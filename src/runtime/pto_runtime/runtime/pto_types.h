@@ -1,21 +1,20 @@
 /**
  * PTO Types - Data structures for PTO runtime extensions
  *
- * Adds strided tensor descriptors, buffer handles, and overlap strategies
- * on top of the base types in pto_runtime.h.
- *
- * Key additions:
+ * Standalone header defining PTO-specific types for:
  * - PTOTensorDescriptor: Strided tensor descriptor for non-contiguous tiles
  * - PTOBufferHandle: Buffer with version tracking for in-place updates
  * - PTOOverlapStrategy: Trade-off between speed and accuracy for dependency detection
+ * - PTOParam: Parameter descriptor for pto_submit_task API
  *
- * Phase 1: Header-only, no behavior change.
+ * This header is independent of pto_runtime.h to allow inclusion from runtime.h
+ * without type conflicts (Handshake, TensorPair, HostApi).
  */
 
 #ifndef PTO_TYPES_H
 #define PTO_TYPES_H
 
-#include "pto_runtime.h"
+#include <stdint.h>
 
 // =============================================================================
 // Configuration
@@ -23,6 +22,14 @@
 
 #ifndef PTO_MAX_TENSOR_DIMS
 #define PTO_MAX_TENSOR_DIMS 8
+#endif
+
+#ifndef PTO_TENSORMAP_POOL_SIZE
+#define PTO_TENSORMAP_POOL_SIZE 4096
+#endif
+
+#ifndef PTO_TENSORMAP_NUM_BUCKETS
+#define PTO_TENSORMAP_NUM_BUCKETS 1024
 #endif
 
 // =============================================================================
@@ -90,6 +97,37 @@ struct PTOBufferHandle {
     int32_t size;            // Buffer size in bytes
     int32_t version;         // Version number (for in-place updates)
     int32_t ref_count;       // Buffer-level reference count (independent of task fanout)
+};
+
+// =============================================================================
+// Parameter Types (for pto_submit_task API)
+// =============================================================================
+
+/**
+ * Parameter Type - Distinguishes inputs from outputs
+ */
+enum PTOParamType : int32_t {
+    PTO_PARAM_INPUT  = 0,  // Read-only input buffer
+    PTO_PARAM_OUTPUT = 1   // Write-only output buffer
+};
+
+/**
+ * Parameter Descriptor for pto_submit_task
+ *
+ * Each parameter carries a full tensor descriptor for automatic
+ * dependency detection via TensorMap overlap checking.
+ *
+ * Example:
+ *   PTOParam params[] = {
+ *       {PTO_PARAM_INPUT,  make_tensor_bbox(dev_a->addr, size), dev_a},
+ *       {PTO_PARAM_OUTPUT, make_tensor_bbox(dev_c->addr, size), dev_c},
+ *   };
+ *   runtime->pto_submit_task(func_id, worker_type, params, 2);
+ */
+struct PTOParam {
+    PTOParamType type;            // PTO_PARAM_INPUT or PTO_PARAM_OUTPUT
+    PTOTensorDescriptor tensor;   // Full strided descriptor for overlap checking
+    PTOBufferHandle* buffer;      // Associated buffer handle (for ref counting)
 };
 
 #endif // PTO_TYPES_H

@@ -188,3 +188,107 @@ int Runtime::get_tensor_pair_count() const {
 void Runtime::clear_tensor_pairs() {
     tensor_pair_count = 0;
 }
+
+// =============================================================================
+// PTO API Implementation (Phase 4)
+// =============================================================================
+
+void Runtime::pto_init() {
+    pto_mode_enabled_ = true;
+    buffer_handle_count_ = 0;
+
+    // Initialize TensorMap
+    tensormap_init(&tensor_map_, tensormap_pool_, PTO_TENSORMAP_POOL_SIZE,
+                   tensormap_buckets_, PTO_TENSORMAP_NUM_BUCKETS);
+
+    printf("[PTO] PTO mode initialized (TensorMap: %d buckets, %d pool entries)\n",
+           PTO_TENSORMAP_NUM_BUCKETS, PTO_TENSORMAP_POOL_SIZE);
+}
+
+PTOBufferHandle* Runtime::pto_alloc(int32_t size) {
+    if (buffer_handle_count_ >= PTO_TENSORMAP_POOL_SIZE) {
+        fprintf(stderr, "[PTO] ERROR: Buffer handle pool full (max=%d)\n", PTO_TENSORMAP_POOL_SIZE);
+        return nullptr;
+    }
+
+    PTOBufferHandle* handle = &buffer_handles_[buffer_handle_count_++];
+    handle->size = size;
+    handle->version = 0;
+    handle->ref_count = 1;
+
+    // Allocate device memory via host API
+    void* dev_ptr = host_api.device_malloc(size);
+    handle->addr = (uint64_t)dev_ptr;
+
+    return handle;
+}
+
+void Runtime::pto_free(PTOBufferHandle* handle) {
+    if (handle == nullptr) return;
+
+    // Decrement reference count
+    // Actual memory reclamation deferred until all consumers finish
+    handle->ref_count--;
+
+    if (handle->ref_count <= 0) {
+        // In full PTO mode (Phase 7), memory reclamation would be handled
+        // by the scheduler via HeapRing. For now, just mark as freed.
+        host_api.device_free((void*)handle->addr);
+        handle->addr = 0;
+    }
+}
+
+PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
+    if (handle == nullptr) return nullptr;
+
+    // Create a new versioned handle (SSA-style)
+    // Same address, incremented version number
+    if (buffer_handle_count_ >= PTO_TENSORMAP_POOL_SIZE) {
+        fprintf(stderr, "[PTO] ERROR: Buffer handle pool full for version_inc\n");
+        return nullptr;
+    }
+
+    PTOBufferHandle* new_handle = &buffer_handles_[buffer_handle_count_++];
+    new_handle->addr = handle->addr;
+    new_handle->size = handle->size;
+    new_handle->version = handle->version + 1;
+    new_handle->ref_count = 1;
+
+    return new_handle;
+}
+
+int Runtime::pto_submit_task(int32_t func_id, int32_t worker_type,
+                             PTOParam* params, int32_t param_count) {
+    // Build kernel args array from params
+    uint64_t args[RUNTIME_MAX_ARGS];
+    int num_args = 0;
+
+    for (int32_t i = 0; i < param_count && num_args < RUNTIME_MAX_ARGS; i++) {
+        args[num_args++] = params[i].buffer->addr;
+    }
+
+    // Add task using legacy API
+    int task_id = add_task(args, num_args, func_id, worker_type);
+    if (task_id < 0) return -1;
+
+    // Automatic dependency detection via TensorMap
+    for (int32_t i = 0; i < param_count; i++) {
+        if (params[i].type == PTO_PARAM_INPUT) {
+            // Look up producer for this input tensor
+            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, 0);
+            if (producer >= 0 && producer != task_id) {
+                add_successor(producer, task_id);
+            }
+        }
+    }
+
+    // Register output tensors in TensorMap
+    for (int32_t i = 0; i < param_count; i++) {
+        if (params[i].type == PTO_PARAM_OUTPUT) {
+            tensormap_insert(&tensor_map_, &params[i].tensor,
+                           task_id, params[i].buffer->version);
+        }
+    }
+
+    return task_id;
+}

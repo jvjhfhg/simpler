@@ -4,9 +4,11 @@
  * This provides a Runtime class compatible with the existing platform layer,
  * allowing the PTO runtime to work with the same infrastructure as host_build_graph.
  *
- * For Phase 1, this is a direct copy of the host_build_graph Runtime interface.
- * In later phases, the internal implementation can be replaced with ring buffers,
- * TensorMap, and other PTO-specific optimizations while maintaining API compatibility.
+ * Supports two modes:
+ * 1. Legacy mode: add_task() + add_successor() (current API, compatible with host_build_graph)
+ * 2. PTO mode:    pto_submit_task() with automatic dependency detection via TensorMap
+ *
+ * The example uses legacy mode by default. PTO mode is enabled via pto_init().
  */
 
 #ifndef RUNTIME_H
@@ -17,6 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <atomic>
+
+#include "tensor_map.h"  // TensorMap, TensorMapEntry, PTOTensorDescriptor, PTOBufferHandle, PTOParam
 
 // =============================================================================
 // Configuration Macros
@@ -149,7 +153,47 @@ public:
     int get_tensor_pair_count() const;
     void clear_tensor_pairs();
 
+    // === PTO API (new in Phase 4) ===
+
+    // Initialize PTO mode (call before any pto_* calls)
+    void pto_init();
+
+    // --- Buffer Management (divergence §1, §2, §3) ---
+    // Allocate buffer handle, returns handle with address
+    // Address is available BEFORE task submission (required for dependent tasks)
+    PTOBufferHandle* pto_alloc(int32_t size);
+
+    // Signal "no more references will be added" (does NOT immediately free)
+    // Device recycles memory after all consumers finish
+    void pto_free(PTOBufferHandle* handle);
+
+    // --- Version Control for In-Place Updates (divergence §6) ---
+    // Returns new versioned handle (SSA-style)
+    // Write to version v waits for all reads from version v-1
+    PTOBufferHandle* pto_version_inc(PTOBufferHandle* handle);
+
+    // --- Task Submission ---
+    // Submit task with automatic dependency detection via TensorMap
+    int pto_submit_task(int32_t func_id, int32_t worker_type,
+                        PTOParam* params, int32_t param_count);
+
+    // --- Query ---
+    bool is_pto_mode() const { return pto_mode_enabled_; }
+
     HostApi host_api;
+
+private:
+    // === PTO Internal State (only used if pto_init called) ===
+    bool pto_mode_enabled_ = false;
+
+    // TensorMap for automatic dependency tracking
+    TensorMap tensor_map_;
+    TensorMapEntry tensormap_pool_[PTO_TENSORMAP_POOL_SIZE];
+    int32_t tensormap_buckets_[PTO_TENSORMAP_NUM_BUCKETS];
+
+    // Buffer handle tracking (divergence §5: independent of task fanout)
+    PTOBufferHandle buffer_handles_[PTO_TENSORMAP_POOL_SIZE];
+    int32_t buffer_handle_count_ = 0;
 };
 
 #endif  // RUNTIME_H
