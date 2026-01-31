@@ -19,6 +19,14 @@ ORCHESTRATIONS = {
         "source": str(_KERNELS_ROOT / "orchestration" / "pto_example_orch.cpp"),
         "function_name": "build_pto_example_graph",
     },
+    "inplace": {
+        "source": str(_KERNELS_ROOT / "orchestration" / "pto_inplace_test.cpp"),
+        "function_name": "build_inplace_test_graph",
+    },
+    "multiconsumer": {
+        "source": str(_KERNELS_ROOT / "orchestration" / "pto_multiconsumer_test.cpp"),
+        "function_name": "build_multiconsumer_test_graph",
+    },
 }
 
 # Default to legacy for backward compatibility
