@@ -31,11 +31,6 @@ constexpr int MAX_AIC_PER_THREAD = 24;
 constexpr int MAX_AIV_PER_THREAD = 48;
 constexpr int MAX_CORES_PER_THREAD = MAX_AIC_PER_THREAD + MAX_AIV_PER_THREAD;
 
-// Worker types
-constexpr int WORKER_CUBE = 0;    // AIC (Compute)
-constexpr int WORKER_VECTOR = 1;  // AIV (Vector)
-constexpr int NUM_WORKER_TYPES = 2;
-
 // =============================================================================
 // PTO Scheduler - FIFO Ready Queues (Phase 8: Only Scheduler)
 // =============================================================================
@@ -67,10 +62,10 @@ struct PtoScheduler {
     int core_assignments_[MAX_AICPU_THREADS][MAX_CORES_PER_THREAD];
 
     // Per-worker-type FIFO ready queues
-    std::mutex ready_queue_mutex_[NUM_WORKER_TYPES];
-    int ready_queue_[NUM_WORKER_TYPES][RUNTIME_MAX_TASKS];
-    std::atomic<int> ready_head_[NUM_WORKER_TYPES];  // Dequeue position
-    std::atomic<int> ready_tail_[NUM_WORKER_TYPES];  // Enqueue position
+    std::mutex ready_queue_mutex_[PTO_NUM_WORKER_TYPES];
+    int ready_queue_[PTO_NUM_WORKER_TYPES][RUNTIME_MAX_TASKS];
+    std::atomic<int> ready_head_[PTO_NUM_WORKER_TYPES];  // Dequeue position
+    std::atomic<int> ready_tail_[PTO_NUM_WORKER_TYPES];  // Enqueue position
 
     std::atomic<int> completed_tasks_{0};
     std::atomic<int> total_tasks_{0};
@@ -94,8 +89,8 @@ struct PtoScheduler {
 static PtoScheduler g_pto_scheduler;
 
 void PtoScheduler::enqueue_ready_task(int task_id, int worker_type) {
-    if (worker_type < 0 || worker_type >= NUM_WORKER_TYPES) {
-        worker_type = WORKER_VECTOR;  // Default to vector
+    if (worker_type < 0 || worker_type >= PTO_NUM_WORKER_TYPES) {
+        worker_type = PTO_WORKER_VECTOR;  // Default to vector
     }
 
     std::lock_guard<std::mutex> lock(ready_queue_mutex_[worker_type]);
@@ -105,7 +100,7 @@ void PtoScheduler::enqueue_ready_task(int task_id, int worker_type) {
 }
 
 int PtoScheduler::dequeue_ready_task(int worker_type) {
-    if (worker_type < 0 || worker_type >= NUM_WORKER_TYPES) {
+    if (worker_type < 0 || worker_type >= PTO_NUM_WORKER_TYPES) {
         return -1;
     }
 
@@ -123,7 +118,7 @@ int PtoScheduler::dequeue_ready_task(int worker_type) {
 }
 
 bool PtoScheduler::has_ready_tasks(int worker_type) {
-    if (worker_type < 0 || worker_type >= NUM_WORKER_TYPES) {
+    if (worker_type < 0 || worker_type >= PTO_NUM_WORKER_TYPES) {
         return false;
     }
 
@@ -198,7 +193,7 @@ int PtoScheduler::init(Runtime* runtime) {
     completed_tasks_.store(0, std::memory_order_release);
 
     // Initialize FIFO ready queues
-    for (int wt = 0; wt < NUM_WORKER_TYPES; wt++) {
+    for (int wt = 0; wt < PTO_NUM_WORKER_TYPES; wt++) {
         ready_head_[wt].store(0, std::memory_order_release);
         ready_tail_[wt].store(0, std::memory_order_release);
     }
@@ -414,7 +409,7 @@ int PtoScheduler::run(Runtime* runtime) {
 
 void PtoScheduler::deinit() {
     // Reset ready queues
-    for (int wt = 0; wt < NUM_WORKER_TYPES; wt++) {
+    for (int wt = 0; wt < PTO_NUM_WORKER_TYPES; wt++) {
         ready_head_[wt].store(0, std::memory_order_release);
         ready_tail_[wt].store(0, std::memory_order_release);
     }

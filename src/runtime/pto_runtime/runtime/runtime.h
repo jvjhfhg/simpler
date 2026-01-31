@@ -140,7 +140,7 @@ public:
     Runtime();
 
     // Internal task management (used by pto_submit_task)
-    int add_task(uint64_t *args, int num_args, int func_id, int core_type = 0);
+    int add_task(uint64_t *args, int num_args, int func_id, PTOWorkerType core_type = PTO_WORKER_VECTOR);
     void add_successor(int from_task, int to_task);
 
     Task *get_task(int task_id);
@@ -175,7 +175,7 @@ public:
 
     // --- Task Submission ---
     // Submit task with automatic dependency detection via TensorMap
-    int pto_submit_task(int32_t func_id, int32_t worker_type,
+    int pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
                         PTOParam* params, int32_t param_count);
 
     HostApi host_api;
