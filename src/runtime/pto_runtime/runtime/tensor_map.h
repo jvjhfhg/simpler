@@ -177,9 +177,9 @@ static inline bool tensors_overlap(const PTOTensorDescriptor* a, const PTOTensor
     PTOOverlapStrategy common = (a->strategy > b->strategy) ? a->strategy : b->strategy;
 
     switch (common) {
-        case PTO_OVERLAP_STRIDED_EXACT:
+        case PTOOverlapStrategy::STRIDED_EXACT:
             return overlap_strided_exact(a, b);
-        case PTO_OVERLAP_BOUNDING_BOX:
+        case PTOOverlapStrategy::BOUNDING_BOX:
         default:
             return overlap_bounding_box(a, b);
     }

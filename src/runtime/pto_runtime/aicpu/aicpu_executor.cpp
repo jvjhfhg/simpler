@@ -90,7 +90,7 @@ static PtoScheduler g_pto_scheduler;
 
 void PtoScheduler::enqueue_ready_task(int task_id, int worker_type) {
     if (worker_type < 0 || worker_type >= PTO_NUM_WORKER_TYPES) {
-        worker_type = PTO_WORKER_VECTOR;  // Default to vector
+        worker_type = static_cast<int>(PTOWorkerType::VECTOR);  // Default to vector
     }
 
     std::lock_guard<std::mutex> lock(ready_queue_mutex_[worker_type]);

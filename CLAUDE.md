@@ -22,6 +22,21 @@ Each developer role has a designated working directory. Stay within your assigne
 2. Create new subdirectories under your assigned directory as needed
 3. When in doubt, ask the user before making changes to other areas
 
+## Coding Standards
+
+1. Use `enum class` preferentially for basic enumeration usage. Use `enum` only when implementing bitmask patterns or when bitwise operations are required.
+
+    **Good:**
+    ```cpp
+    enum class CoreType : int { AIC = 0, AIV = 1 };
+    CoreType type = CoreType::AIC;
+    ```
+
+    **Bad (unless implementing bitmask):**
+    ```cpp
+    enum CoreType { AIC = 0, AIV = 1 };  // Avoid this for basic enums
+    ```
+
 ## Terminology (Based on Ascend NPU Architecture)
 
 ### Hardware Units
