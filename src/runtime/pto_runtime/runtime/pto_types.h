@@ -33,6 +33,26 @@
 #endif
 
 // =============================================================================
+// Worker Types
+// =============================================================================
+
+/**
+ * Worker types for heterogeneous scheduling
+ *
+ * Tasks are routed to different ready queues based on worker_type:
+ * - PTO_WORKER_CUBE:   AICore-CUBE (matrix ops, convolution)
+ * - PTO_WORKER_VECTOR: AICore-VECTOR (element-wise ops, activation)
+ *
+ * Note: AICPU is not a worker type - AICPU threads act as schedulers that
+ * dispatch tasks to AICore workers.
+ */
+enum PTOWorkerType : int32_t {
+    PTO_WORKER_CUBE    = 0,  // AICore-CUBE
+    PTO_WORKER_VECTOR  = 1,  // AICore-VECTOR
+    PTO_NUM_WORKER_TYPES = 2
+};
+
+// =============================================================================
 // Overlap Judgment Strategies
 // =============================================================================
 

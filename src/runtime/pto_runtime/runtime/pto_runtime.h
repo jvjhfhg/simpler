@@ -25,6 +25,8 @@
 #include <stdbool.h>
 #include <atomic>
 
+#include "pto_types.h"  // PTOWorkerType, PTOTensorDescriptor, etc.
+
 // =============================================================================
 // Configuration Constants
 // =============================================================================
@@ -62,12 +64,6 @@
 #ifndef PTO_MAX_SCOPE_DEPTH
 #define PTO_MAX_SCOPE_DEPTH 32
 #endif
-
-// Worker types (for heterogeneous scheduling)
-#define PTO_WORKER_CUBE    0  // AIC (Compute)
-#define PTO_WORKER_VECTOR  1  // AIV (Vector)
-#define PTO_WORKER_AICPU   2  // AICPU
-#define PTO_NUM_WORKER_TYPES 3
 
 // Alignment for DMA and cache efficiency
 #ifndef PTO_ALIGNMENT
@@ -150,7 +146,7 @@ struct PTOTaskDescriptor {
     // === Task Identity ===
     int32_t task_id;                      // Unique task identifier (may wrap in ring)
     int32_t func_id;                      // Kernel function ID
-    int32_t worker_type;                  // PTO_WORKER_CUBE, VECTOR, or AICPU
+    PTOWorkerType worker_type;            // PTO_WORKER_CUBE, VECTOR, or AICPU
     int32_t num_args;                     // Number of valid arguments
 
     // === Kernel Arguments ===

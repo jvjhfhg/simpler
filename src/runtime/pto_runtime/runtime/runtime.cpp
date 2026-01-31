@@ -39,7 +39,7 @@ Runtime::Runtime() {
 // Task Management
 // =============================================================================
 
-int Runtime::add_task(uint64_t* args, int num_args, int func_id, int core_type) {
+int Runtime::add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType core_type) {
     if (next_task_id >= RUNTIME_MAX_TASKS) {
         fprintf(stderr, "[PTO Runtime] ERROR: Task table full (max=%d)\n", RUNTIME_MAX_TASKS);
         return -1;
@@ -256,7 +256,7 @@ PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
     return new_handle;
 }
 
-int Runtime::pto_submit_task(int32_t func_id, int32_t worker_type,
+int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
                              PTOParam* params, int32_t param_count) {
     // Build kernel args array from params
     uint64_t args[RUNTIME_MAX_ARGS];

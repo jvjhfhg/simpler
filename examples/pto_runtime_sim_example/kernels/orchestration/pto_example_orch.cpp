@@ -142,7 +142,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_c, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t0 = runtime->pto_submit_task(0, 1, params0, 4);  // kernel_add
+    int t0 = runtime->pto_submit_task(0, PTO_WORKER_VECTOR, params0, 4);  // kernel_add
     std::cout << "Task " << t0 << ": c = a + b\n";
 
     // Task 1: d = c + 1
@@ -152,7 +152,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_d, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t1 = runtime->pto_submit_task(1, 1, params1, 4);  // kernel_add_scalar
+    int t1 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params1, 4);  // kernel_add_scalar
     std::cout << "Task " << t1 << ": d = c + 1\n";
 
     // Task 2: e = c + 2
@@ -162,7 +162,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_e, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t2 = runtime->pto_submit_task(1, 1, params2, 4);  // kernel_add_scalar
+    int t2 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params2, 4);  // kernel_add_scalar
     std::cout << "Task " << t2 << ": e = c + 2\n";
 
     // Task 3: f = d * e (final result for test 1)
@@ -172,7 +172,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_f, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t3 = runtime->pto_submit_task(2, 1, params3, 4);  // kernel_mul
+    int t3 = runtime->pto_submit_task(2, PTO_WORKER_VECTOR, params3, 4);  // kernel_mul
     std::cout << "Task " << t3 << ": f = d * e (expected: 42.0)\n";
 
     // =========================================================================
@@ -197,7 +197,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_x_v0, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t4 = runtime->pto_submit_task(1, 1, params4, 4);  // kernel_add_scalar
+    int t4 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params4, 4);  // kernel_add_scalar
     std::cout << "Task " << t4 << ": x_v0 = a + 1\n";
 
     // Create version 1 of x for in-place update
@@ -211,7 +211,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_x_v1, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t5 = runtime->pto_submit_task(1, 1, params5, 4);
+    int t5 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params5, 4);
     std::cout << "Task " << t5 << ": x_v1 = x_v0 + 1 (in-place)\n";
 
     // Create version 2 of x
@@ -225,7 +225,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_x_v2, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t6 = runtime->pto_submit_task(1, 1, params6, 4);
+    int t6 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params6, 4);
     std::cout << "Task " << t6 << ": x_v2 = x_v1 + 1 (in-place)\n";
 
     // Task 7: g = x_v2 + 1 (final result for test 2)
@@ -235,7 +235,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_g, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t7 = runtime->pto_submit_task(1, 1, params7, 4);
+    int t7 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params7, 4);
     std::cout << "Task " << t7 << ": g = x_v2 + 1 (expected: 6.0)\n";
 
     // =========================================================================
@@ -267,7 +267,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_p, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t8 = runtime->pto_submit_task(1, 1, params8, 4);
+    int t8 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params8, 4);
     std::cout << "Task " << t8 << ": p = a + 1 (consumer 1 of 'a')\n";
 
     // Task 9: q = a + 2 (consumer 2 of 'a')
@@ -277,7 +277,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_q, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t9 = runtime->pto_submit_task(1, 1, params9, 4);
+    int t9 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params9, 4);
     std::cout << "Task " << t9 << ": q = a + 2 (consumer 2 of 'a')\n";
 
     // Task 10: r = a + 3 (consumer 3 of 'a')
@@ -287,7 +287,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_r, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t10 = runtime->pto_submit_task(1, 1, params10, 4);
+    int t10 = runtime->pto_submit_task(1, PTO_WORKER_VECTOR, params10, 4);
     std::cout << "Task " << t10 << ": r = a + 3 (consumer 3 of 'a')\n";
 
     // Task 11: s = p + q (waits for t8 and t9)
@@ -297,7 +297,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_s, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t11 = runtime->pto_submit_task(0, 1, params11, 4);  // kernel_add
+    int t11 = runtime->pto_submit_task(0, PTO_WORKER_VECTOR, params11, 4);  // kernel_add
     std::cout << "Task " << t11 << ": s = p + q\n";
 
     // Task 12: h = s + r (waits for t10 and t11)
@@ -307,7 +307,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
         make_output_param(dev_h, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
-    int t12 = runtime->pto_submit_task(0, 1, params12, 4);  // kernel_add
+    int t12 = runtime->pto_submit_task(0, PTO_WORKER_VECTOR, params12, 4);  // kernel_add
     std::cout << "Task " << t12 << ": h = s + r (expected: 12.0)\n";
 
     // =========================================================================
