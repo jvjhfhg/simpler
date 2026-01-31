@@ -35,7 +35,7 @@ try:
     from runtime_builder import RuntimeBuilder
     from bindings import bind_host_binary, register_kernel, set_device, launch_runtime
     from elf_parser import extract_text_section
-    from kernels.kernel_config import KERNELS, ORCHESTRATION
+    from kernels.kernel_config import KERNELS, ORCHESTRATIONS
 except ImportError as e:
     print(f"Error: Cannot import module: {e}")
     print("Make sure you are running this from the correct directory")
@@ -46,9 +46,14 @@ def main():
     parser = argparse.ArgumentParser(description="PTO Runtime Simulation Example")
     parser.add_argument("-d", "--device", type=int, default=0,
                         help="Device ID (simulation, default: 0)")
+    parser.add_argument("--pto", action="store_true",
+                        help="Use PTO-native orchestration instead of legacy")
     args = parser.parse_args()
 
     device_id = args.device
+    orch_mode = "pto" if args.pto else "legacy"
+    ORCHESTRATION = ORCHESTRATIONS[orch_mode]
+    print(f"\nOrchestration mode: {orch_mode}")
 
     # Build PTO runtime (instead of host_build_graph)
     print("\n=== Building PTO Runtime (Simulation) ===")

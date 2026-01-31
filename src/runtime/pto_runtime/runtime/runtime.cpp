@@ -264,7 +264,11 @@ int Runtime::pto_submit_task(int32_t func_id, int32_t worker_type,
     int num_args = 0;
 
     for (int32_t i = 0; i < param_count && num_args < RUNTIME_MAX_ARGS; i++) {
-        args[num_args++] = params[i].buffer->addr;
+        if (params[i].type == PTO_PARAM_SCALAR) {
+            args[num_args++] = params[i].scalar_value;
+        } else {
+            args[num_args++] = params[i].buffer->addr;
+        }
     }
 
     // Add task using legacy API
@@ -273,7 +277,7 @@ int Runtime::pto_submit_task(int32_t func_id, int32_t worker_type,
 
     // Automatic dependency detection via TensorMap
     for (int32_t i = 0; i < param_count; i++) {
-        if (params[i].type == PTO_PARAM_INPUT) {
+        if (params[i].type == PTO_PARAM_INPUT && params[i].buffer != nullptr) {
             // Look up producer for this input tensor
             int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, 0);
             if (producer >= 0 && producer != task_id) {
@@ -284,7 +288,7 @@ int Runtime::pto_submit_task(int32_t func_id, int32_t worker_type,
 
     // Register output tensors in TensorMap
     for (int32_t i = 0; i < param_count; i++) {
-        if (params[i].type == PTO_PARAM_OUTPUT) {
+        if (params[i].type == PTO_PARAM_OUTPUT && params[i].buffer != nullptr) {
             tensormap_insert(&tensor_map_, &params[i].tensor,
                            task_id, params[i].buffer->version);
         }

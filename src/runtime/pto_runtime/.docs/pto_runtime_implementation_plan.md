@@ -843,7 +843,7 @@ PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 | 3 | TensorMap (header) | ✓ COMPLETE | ✓ YES |
 | 4 | Dual-mode Runtime class | ✓ COMPLETE | ✓ YES |
 | 5 | PTO-native scheduler | ✓ COMPLETE | ✓ YES |
-| 6 | PTO-native orchestration | PENDING | - |
+| 6 | PTO-native orchestration | ✓ COMPLETE | ✓ YES |
 | 7 | Full PTO mode | PENDING | - |
 | 8 | Remove legacy, PTO default | PENDING | - |
 
@@ -855,7 +855,10 @@ PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 
 ```bash
 cd /data/z00626005/code/simpler
+# Legacy mode (default)
 PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
+# PTO mode (Phase 6+)
+PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --pto
 ```
 
 Expected output:

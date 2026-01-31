@@ -9,11 +9,20 @@ from pathlib import Path
 
 _KERNELS_ROOT = Path(__file__).parent
 
-# Orchestration config
-ORCHESTRATION = {
-    "source": str(_KERNELS_ROOT / "orchestration" / "example_orch.cpp"),
-    "function_name": "build_example_graph",
+# Orchestration configs
+ORCHESTRATIONS = {
+    "legacy": {
+        "source": str(_KERNELS_ROOT / "orchestration" / "example_orch.cpp"),
+        "function_name": "build_example_graph",
+    },
+    "pto": {
+        "source": str(_KERNELS_ROOT / "orchestration" / "pto_example_orch.cpp"),
+        "function_name": "build_pto_example_graph",
+    },
 }
+
+# Default to legacy for backward compatibility
+ORCHESTRATION = ORCHESTRATIONS["legacy"]
 
 # Kernel configs (simulation kernels, compiled with g++)
 KERNELS = [
