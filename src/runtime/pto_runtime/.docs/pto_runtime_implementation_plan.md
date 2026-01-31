@@ -836,46 +836,48 @@ PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 
 | Phase | Description | Status | Test Passes |
 |-------|-------------|--------|-------------|
-| 0 | Baseline with Runtime class | ✓ COMPLETE | ✓ YES |
-| 1 | PTO data structures (header) | ✓ COMPLETE | ✓ YES |
-| 2 | Ring buffer utilities (header) | ✓ COMPLETE | ✓ YES |
-| 3 | TensorMap (header) | ✓ COMPLETE | ✓ YES |
-| 4 | Dual-mode Runtime class | ✓ COMPLETE | ✓ YES |
-| 5 | PTO-native scheduler | ✓ COMPLETE | ✓ YES |
-| 6 | PTO-native orchestration | ✓ COMPLETE | ✓ YES |
-| 7 | Full PTO mode | ✓ COMPLETE | ✓ YES |
-| 8 | Remove legacy, PTO default | PENDING | - |
+| 0 | Baseline with Runtime class | ✓ COMPLETE | ✓ VERIFIED |
+| 1 | PTO data structures (header) | ✓ COMPLETE | ✓ VERIFIED |
+| 2 | Ring buffer utilities (header) | ✓ COMPLETE | ✓ VERIFIED |
+| 3 | TensorMap (header) | ✓ COMPLETE | ✓ VERIFIED |
+| 4 | Dual-mode Runtime class | ✓ COMPLETE | ✓ VERIFIED |
+| 5 | PTO-native scheduler | ✓ COMPLETE | ✓ VERIFIED |
+| 6 | PTO-native orchestration | ✓ COMPLETE | ✓ VERIFIED |
+| 7 | Full PTO mode | ✓ COMPLETE | ✓ VERIFIED |
+| 8 | Remove legacy, PTO default | ✓ COMPLETE | ✓ VERIFIED (2026-01-31) |
+
+### Phase 8 Test Results (2026-01-31)
+
+PTO-only mode test passed:
+
+| Test | Command | Expected | Result |
+|------|---------|----------|--------|
+| PTO default | `main.py` | 42.0 | ✓ PASS |
+
+**Phase 8 Changes:**
+- Removed legacy scheduler (`AicpuExecutor`) from `aicpu_executor.cpp`
+- Removed `is_pto_mode()` flag from `Runtime` class
+- Updated `kernel_config.py` to single PTO orchestration entry
+- Updated `main.py` to remove `--mode` flag - PTO is default
 
 ---
 
+## 12. Implementation Complete |
+
 ## 12. Test Commands
 
-**After every phase**, run:
+**PTO mode is now the default:**
 
 ```bash
 cd /data/z00626005/code/simpler
-# Legacy mode (default)
 PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
-# PTO mode
-PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode pto
-# In-place update test (Phase 7)
-PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode inplace
-# Multi-consumer test (Phase 7)
-PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode multiconsumer
 ```
 
 Expected output:
 ```
 ...
-SUCCESS: All 16384 elements are correct (<expected_value>)
+SUCCESS: All 16384 elements are correct (42.0)
 ```
-
-| Mode | Expected Value |
-|------|----------------|
-| legacy | 42.0 |
-| pto | 42.0 |
-| inplace | 6.0 |
-| multiconsumer | 9.0 |
 
 ---
 

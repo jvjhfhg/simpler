@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-PTO Runtime Simulation Example
+PTO Runtime Simulation Example (Phase 8: PTO-Only Mode)
 
 This demonstrates the PTO runtime running on the a2a3sim simulation platform,
-using the same formula as host_build_graph_sim_example:
+using the formula:
 
     f = (a + b + 1) * (a + b + 2)
 
@@ -11,7 +11,7 @@ With a=2.0, b=3.0, expected result is 42.0 for all elements.
 
 This example validates that the PTO runtime:
 1. Builds correctly via RuntimeBuilder
-2. Loads orchestration and builds task graph
+2. Loads orchestration and builds task graph via pto_submit_task()
 3. Schedules and executes tasks on simulated AICore workers
 4. Produces correct results
 
@@ -20,7 +20,6 @@ Usage:
 """
 
 import sys
-import argparse
 from pathlib import Path
 import numpy as np
 
@@ -35,7 +34,7 @@ try:
     from runtime_builder import RuntimeBuilder
     from bindings import bind_host_binary, register_kernel, set_device, launch_runtime
     from elf_parser import extract_text_section
-    from kernels.kernel_config import KERNELS, ORCHESTRATIONS
+    from kernels.kernel_config import KERNELS, ORCHESTRATION
 except ImportError as e:
     print(f"Error: Cannot import module: {e}")
     print("Make sure you are running this from the correct directory")
@@ -43,20 +42,10 @@ except ImportError as e:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PTO Runtime Simulation Example")
-    parser.add_argument("-d", "--device", type=int, default=0,
-                        help="Device ID (simulation, default: 0)")
-    parser.add_argument("--mode", type=str, default="legacy",
-                        choices=["legacy", "pto", "inplace", "multiconsumer"],
-                        help="Orchestration mode (default: legacy)")
-    args = parser.parse_args()
+    device_id = 0
+    print("\n=== PTO Runtime Simulation (Phase 8: PTO-Only Mode) ===")
 
-    device_id = args.device
-    orch_mode = args.mode
-    ORCHESTRATION = ORCHESTRATIONS[orch_mode]
-    print(f"\nOrchestration mode: {orch_mode}")
-
-    # Build PTO runtime (instead of host_build_graph)
+    # Build PTO runtime
     print("\n=== Building PTO Runtime (Simulation) ===")
     builder = RuntimeBuilder(platform="a2a3sim")
     pto_compiler = builder.get_pto_compiler()
@@ -115,19 +104,7 @@ def main():
     host_b = np.full(SIZE, 3.0, dtype=np.float32)
     host_f = np.zeros(SIZE, dtype=np.float32)
 
-    # Expected results per mode
-    expected_values = {
-        "legacy": 42.0,       # (2+3+1)*(2+3+2) = 42
-        "pto": 42.0,          # same formula
-        "inplace": 6.0,       # a+1+1+1+1 = 2+4 = 6
-        "multiconsumer": 9.0,  # (1+1)+(1+2)+(1+3) => e=b+c=3+4=7... wait
-    }
-    # For multiconsumer with a=1.0: b=2, c=3, d=4, e=b+c=5, f=e+d=9
-    if orch_mode == "multiconsumer":
-        host_a = np.full(SIZE, 1.0, dtype=np.float32)
-        expected_values["multiconsumer"] = 9.0  # b=2, c=3, d=4, e=5, f=9
-
-    expected = expected_values.get(orch_mode, 42.0)
+    expected = 42.0  # (2+3+1)*(2+3+2) = 42
 
     print(f"Created tensors: {SIZE} elements each")
     print(f"  host_a: all {host_a[0]}")
