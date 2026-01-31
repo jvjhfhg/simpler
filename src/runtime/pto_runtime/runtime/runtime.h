@@ -140,7 +140,7 @@ public:
     Runtime();
 
     // Internal task management (used by pto_submit_task)
-    int add_task(uint64_t *args, int num_args, int func_id, PTOWorkerType core_type = PTO_WORKER_VECTOR);
+    int add_task(uint64_t *args, int num_args, int func_id, PTOWorkerType core_type = PTOWorkerType::VECTOR);
     void add_successor(int from_task, int to_task);
 
     Task *get_task(int task_id);

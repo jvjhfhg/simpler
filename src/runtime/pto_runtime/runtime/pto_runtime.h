@@ -87,12 +87,12 @@
  *
  * Memory reclamation happens when task transitions to CONSUMED.
  */
-enum TaskState : int32_t {
-    TASK_PENDING   = 0,  // Waiting for dependencies
-    TASK_READY     = 1,  // All dependencies met, in ready queue
-    TASK_RUNNING   = 2,  // Executing on worker
-    TASK_COMPLETED = 3,  // Execution done, may have live consumers
-    TASK_CONSUMED  = 4   // All consumers done, buffer can be freed
+enum class TaskState : int32_t {
+    PENDING   = 0,  // Waiting for dependencies
+    READY     = 1,  // All dependencies met, in ready queue
+    RUNNING   = 2,  // Executing on worker
+    COMPLETED = 3,  // Execution done, may have live consumers
+    CONSUMED  = 4   // All consumers done, buffer can be freed
 };
 
 // =============================================================================
@@ -146,7 +146,7 @@ struct PTOTaskDescriptor {
     // === Task Identity ===
     int32_t task_id;                      // Unique task identifier (may wrap in ring)
     int32_t func_id;                      // Kernel function ID
-    PTOWorkerType worker_type;            // PTO_WORKER_CUBE, VECTOR, or AICPU
+    PTOWorkerType worker_type;            // PTOWorkerType::CUBE or PTOWorkerType::VECTOR
     int32_t num_args;                     // Number of valid arguments
 
     // === Kernel Arguments ===
@@ -298,9 +298,9 @@ struct TensorPair {
 /**
  * Parameter Type - Distinguishes inputs from outputs
  */
-enum PTOParamType : int32_t {
-    PTO_INPUT  = 0,  // Read-only input buffer
-    PTO_OUTPUT = 1   // Write-only output buffer
+enum class PTOParamType : int32_t {
+    INPUT  = 0,  // Read-only input buffer
+    OUTPUT = 1   // Write-only output buffer
 };
 
 /**
@@ -312,15 +312,15 @@ enum PTOParamType : int32_t {
  * Example usage:
  *   void* C = NULL;
  *   PTOParam params[] = {
- *       {PTO_INPUT,  (uint64_t)A, 0, size_A, NULL},
- *       {PTO_INPUT,  (uint64_t)B, 0, size_B, NULL},
- *       {PTO_OUTPUT, 0, 0, size_C, &C}  // Runtime writes address to C
+ *       {PTOParamType::INPUT,  (uint64_t)A, 0, size_A, NULL},
+ *       {PTOParamType::INPUT,  (uint64_t)B, 0, size_B, NULL},
+ *       {PTOParamType::OUTPUT, 0, 0, size_C, &C}  // Runtime writes address to C
  *   };
  *   pto_submit_task(orch, func_id, worker_type, params, 3);
  *   // After return, C contains allocated device buffer address
  */
 struct PTOParam {
-    PTOParamType type;      // PTO_INPUT or PTO_OUTPUT
+    PTOParamType type;      // PTOParamType::INPUT or PTOParamType::OUTPUT
     uint64_t base_ptr;      // For INPUT: buffer address; for OUTPUT: unused
     int32_t offset;         // Byte offset within buffer
     int32_t size;           // Size in bytes
