@@ -795,7 +795,7 @@ Complete the PTO runtime with all features:
 | 1 | PTO data structures (header) | ✓ COMPLETE | ✓ YES |
 | 2 | Ring buffer utilities (header) | ✓ COMPLETE | ✓ YES |
 | 3 | TensorMap (header) | ✓ COMPLETE | ✓ YES |
-| 4 | Dual-mode Runtime class | PENDING | - |
+| 4 | Dual-mode Runtime class | ✓ COMPLETE | ✓ YES |
 | 5 | PTO-native scheduler | PENDING | - |
 | 6 | PTO-native orchestration | PENDING | - |
 | 7 | Full PTO mode | PENDING | - |
@@ -827,7 +827,7 @@ SUCCESS: All 16384 elements are correct (42.0)
 | 1 | Add `pto_types.h` (includes `PTOTensorDescriptor`, `PTOBufferHandle`, `PTOOverlapStrategy`) | None ✓ |
 | 2 | Update `ring_buffer.h`, `dep_list_pool.h` | None ✓ (already existed from Phase 0) |
 | 3 | Add `tensor_map.h` (with strided overlap strategies) | None ✓ |
-| 4 | Update `runtime.h`, `runtime.cpp` (add `pto_alloc`, `pto_free`, `pto_version_inc`, `pto_submit_task`) | New API (unused) |
+| 4 | Update `runtime.h`, `runtime.cpp`, `pto_types.h` (add `pto_alloc`, `pto_free`, `pto_version_inc`, `pto_submit_task`) | New API (unused) ✓ |
 | 5 | Update `aicpu_executor.cpp` | PTO scheduler (unused) |
 | 6 | Add `pto_example_orch.cpp`, update `kernel_config.py` | PTO orchestration |
 | 7 | Full integration (buffer ref counting, version control, strided overlap) | Complete PTO mode |
