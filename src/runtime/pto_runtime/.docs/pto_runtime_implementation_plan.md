@@ -792,7 +792,7 @@ Complete the PTO runtime with all features:
 | Phase | Description | Status | Test Passes |
 |-------|-------------|--------|-------------|
 | 0 | Baseline with Runtime class | ✓ COMPLETE | ✓ YES |
-| 1 | PTO data structures (header) | PENDING | - |
+| 1 | PTO data structures (header) | ✓ COMPLETE | ✓ YES |
 | 2 | Ring buffer utilities (header) | PENDING | - |
 | 3 | TensorMap (header) | PENDING | - |
 | 4 | Dual-mode Runtime class | PENDING | - |
@@ -824,7 +824,7 @@ SUCCESS: All 16384 elements are correct (42.0)
 | Phase | Files Added/Modified | Behavior Change |
 |-------|---------------------|-----------------|
 | 0 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp`, `aicore_executor.cpp`, `runtime_maker.cpp` | Baseline |
-| 1 | Add `pto_types.h` (includes `PTOTensorDescriptor`, `PTOBufferHandle`, `PTOOverlapStrategy`) | None |
+| 1 | Add `pto_types.h` (includes `PTOTensorDescriptor`, `PTOBufferHandle`, `PTOOverlapStrategy`) | None ✓ |
 | 2 | Update `ring_buffer.h`, `dep_list_pool.h` | None |
 | 3 | Add `tensor_map.h` (with strided overlap strategies) | None |
 | 4 | Update `runtime.h`, `runtime.cpp` (add `pto_alloc`, `pto_free`, `pto_version_inc`, `pto_submit_task`) | New API (unused) |
