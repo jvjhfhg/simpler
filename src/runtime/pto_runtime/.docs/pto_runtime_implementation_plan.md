@@ -760,7 +760,7 @@ PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 # Expected: SUCCESS
 
 # PTO mode (explicit)
-PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --pto
+PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode pto
 # Expected: SUCCESS
 ```
 
@@ -776,16 +776,15 @@ Complete the PTO runtime with all features:
 - Buffer-level reference counting (independent of task fanout, divergence §5)
 - Version control for in-place updates via `pto_version_inc()` (divergence §6)
 
-### 10.2 Test Matrix
+### 10.2 Test Matrix (Phase 7 Complete)
 
-| Test | Legacy Mode | PTO Mode |
-|------|-------------|----------|
-| `main.py` (default) | ✓ PASS | - |
-| `main.py --pto` | - | ✓ PASS |
-| Diamond DAG | ✓ PASS | ✓ PASS |
-| Back-pressure | - | ✓ PASS |
-| In-place update (version_inc) | - | ✓ PASS |
-| Multi-producer buffer | - | ✓ PASS |
+| Test | Legacy Mode | PTO Mode | Status |
+|------|-------------|----------|--------|
+| `main.py --mode legacy` | ✓ PASS (42.0) | - | ✓ VERIFIED |
+| `main.py --mode pto` | - | ✓ PASS (42.0) | ✓ VERIFIED |
+| Diamond DAG | ✓ PASS | ✓ PASS | ✓ VERIFIED |
+| In-place update (`--mode inplace`) | - | ✓ PASS (6.0) | ✓ VERIFIED |
+| Multi-consumer (`--mode multiconsumer`) | - | ✓ PASS (9.0) | ✓ VERIFIED |
 
 ---
 
@@ -793,7 +792,7 @@ Complete the PTO runtime with all features:
 
 ### 10b.1 Goal
 
-Remove the legacy `add_task()` / `add_successor()` code path entirely. The PTO API (`pto_alloc`, `pto_submit_task`, etc.) becomes the only mode. The example runs PTO mode by default without any `--pto` flag.
+Remove the legacy `add_task()` / `add_successor()` code path entirely. The PTO API (`pto_alloc`, `pto_submit_task`, etc.) becomes the only mode. The example runs PTO mode by default without any `--mode` flag.
 
 ### 10b.2 Changes
 
@@ -805,7 +804,7 @@ Remove the legacy `add_task()` / `add_successor()` code path entirely. The PTO A
    - `pto_init()` called automatically in constructor or made implicit
 
 3. **`examples/pto_runtime_sim_example/main.py`**:
-   - Remove `--pto` flag; PTO orchestration is the default
+   - Remove `--mode` flag; PTO orchestration is the default
    - Remove legacy orchestration selection from `kernel_config.py`
 
 4. **`examples/pto_runtime_sim_example/kernels/kernel_config.py`**:
@@ -844,7 +843,7 @@ PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 | 4 | Dual-mode Runtime class | ✓ COMPLETE | ✓ YES |
 | 5 | PTO-native scheduler | ✓ COMPLETE | ✓ YES |
 | 6 | PTO-native orchestration | ✓ COMPLETE | ✓ YES |
-| 7 | Full PTO mode | PENDING | - |
+| 7 | Full PTO mode | ✓ COMPLETE | ✓ YES |
 | 8 | Remove legacy, PTO default | PENDING | - |
 
 ---
@@ -857,15 +856,26 @@ PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 cd /data/z00626005/code/simpler
 # Legacy mode (default)
 PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
-# PTO mode (Phase 6+)
-PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --pto
+# PTO mode
+PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode pto
+# In-place update test (Phase 7)
+PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode inplace
+# Multi-consumer test (Phase 7)
+PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py --mode multiconsumer
 ```
 
 Expected output:
 ```
 ...
-SUCCESS: All 16384 elements are correct (42.0)
+SUCCESS: All 16384 elements are correct (<expected_value>)
 ```
+
+| Mode | Expected Value |
+|------|----------------|
+| legacy | 42.0 |
+| pto | 42.0 |
+| inplace | 6.0 |
+| multiconsumer | 9.0 |
 
 ---
 
@@ -880,8 +890,8 @@ SUCCESS: All 16384 elements are correct (42.0)
 | 4 | Update `runtime.h`, `runtime.cpp`, `pto_types.h` (add `pto_alloc`, `pto_free`, `pto_version_inc`, `pto_submit_task`) | New API (unused) ✓ |
 | 5 | Update `aicpu_executor.cpp` with dual-mode routing | PTO scheduler (behind flag) ✓ |
 | 6 | Add `pto_example_orch.cpp`, update `kernel_config.py` | PTO orchestration |
-| 7 | Full integration (buffer ref counting, version control, strided overlap) | Complete PTO mode |
-| 8 | Remove `AicpuExecutor`, legacy API, `--pto` flag; update example to PTO default | PTO-only mode |
+| 7 | Add `pto_inplace_test.cpp`, `pto_multiconsumer_test.cpp`; update `kernel_config.py`, `main.py` | Full integration tests (in-place updates, multi-consumer) ✓ |
+| 8 | Remove `AicpuExecutor`, legacy API, `--mode` flag; update example to PTO default | PTO-only mode |
 
 ---
 

@@ -46,12 +46,13 @@ def main():
     parser = argparse.ArgumentParser(description="PTO Runtime Simulation Example")
     parser.add_argument("-d", "--device", type=int, default=0,
                         help="Device ID (simulation, default: 0)")
-    parser.add_argument("--pto", action="store_true",
-                        help="Use PTO-native orchestration instead of legacy")
+    parser.add_argument("--mode", type=str, default="legacy",
+                        choices=["legacy", "pto", "inplace", "multiconsumer"],
+                        help="Orchestration mode (default: legacy)")
     args = parser.parse_args()
 
     device_id = args.device
-    orch_mode = "pto" if args.pto else "legacy"
+    orch_mode = args.mode
     ORCHESTRATION = ORCHESTRATIONS[orch_mode]
     print(f"\nOrchestration mode: {orch_mode}")
 
@@ -114,11 +115,25 @@ def main():
     host_b = np.full(SIZE, 3.0, dtype=np.float32)
     host_f = np.zeros(SIZE, dtype=np.float32)
 
+    # Expected results per mode
+    expected_values = {
+        "legacy": 42.0,       # (2+3+1)*(2+3+2) = 42
+        "pto": 42.0,          # same formula
+        "inplace": 6.0,       # a+1+1+1+1 = 2+4 = 6
+        "multiconsumer": 9.0,  # (1+1)+(1+2)+(1+3) => e=b+c=3+4=7... wait
+    }
+    # For multiconsumer with a=1.0: b=2, c=3, d=4, e=b+c=5, f=e+d=9
+    if orch_mode == "multiconsumer":
+        host_a = np.full(SIZE, 1.0, dtype=np.float32)
+        expected_values["multiconsumer"] = 9.0  # b=2, c=3, d=4, e=5, f=9
+
+    expected = expected_values.get(orch_mode, 42.0)
+
     print(f"Created tensors: {SIZE} elements each")
-    print(f"  host_a: all 2.0")
-    print(f"  host_b: all 3.0")
+    print(f"  host_a: all {host_a[0]}")
+    print(f"  host_b: all {host_b[0]}")
     print(f"  host_f: zeros (output)")
-    print(f"Expected result: f = (a + b + 1) * (a + b + 2) = (2+3+1)*(2+3+2) = 42.0")
+    print(f"Expected result: {expected}")
 
     func_args = [
         host_a.ctypes.data,
@@ -154,14 +169,13 @@ def main():
     for i in range(10):
         print(f"  f[{i}] = {host_f[i]}")
 
-    expected = 42.0
     all_correct = np.allclose(host_f, expected, rtol=1e-5)
     error_count = np.sum(~np.isclose(host_f, expected, rtol=1e-5))
 
     if all_correct:
-        print(f"\nSUCCESS: All {SIZE} elements are correct (42.0)")
+        print(f"\nSUCCESS: All {SIZE} elements are correct ({expected})")
     else:
-        print(f"\nFAILED: {error_count} elements are incorrect")
+        print(f"\nFAILED: {error_count} elements are incorrect (expected {expected})")
 
     return 0 if all_correct else -1
 
