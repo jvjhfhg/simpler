@@ -842,8 +842,9 @@ extern "C" int aicpu_execute(Runtime* runtime) {
 
     // Route to appropriate scheduler based on runtime mode
     if (runtime->is_pto_mode()) {
-        DEV_INFO("%s", "aicpu_execute: PTO mode detected, using PTO scheduler");
-        return pto_scheduler_run(runtime);
+        DEV_INFO("%s", "aicpu_execute: PTO mode detected, using legacy scheduler (Phase 6 compatibility)");
+        // Phase 6: PTO mode still uses legacy scheduler since task graph is built via add_task/add_successor
+        return legacy_scheduler_run(runtime);
     } else {
         DEV_INFO("%s", "aicpu_execute: Legacy mode, using legacy scheduler");
         return legacy_scheduler_run(runtime);

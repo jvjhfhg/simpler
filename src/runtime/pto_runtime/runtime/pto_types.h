@@ -108,7 +108,8 @@ struct PTOBufferHandle {
  */
 enum PTOParamType : int32_t {
     PTO_PARAM_INPUT  = 0,  // Read-only input buffer
-    PTO_PARAM_OUTPUT = 1   // Write-only output buffer
+    PTO_PARAM_OUTPUT = 1,  // Write-only output buffer
+    PTO_PARAM_SCALAR = 2   // Raw scalar value (no buffer, no dependency tracking)
 };
 
 /**
@@ -125,9 +126,10 @@ enum PTOParamType : int32_t {
  *   runtime->pto_submit_task(func_id, worker_type, params, 2);
  */
 struct PTOParam {
-    PTOParamType type;            // PTO_PARAM_INPUT or PTO_PARAM_OUTPUT
-    PTOTensorDescriptor tensor;   // Full strided descriptor for overlap checking
-    PTOBufferHandle* buffer;      // Associated buffer handle (for ref counting)
+    PTOParamType type;            // PTO_PARAM_INPUT, PTO_PARAM_OUTPUT, or PTO_PARAM_SCALAR
+    PTOTensorDescriptor tensor;   // Full strided descriptor for overlap checking (unused for SCALAR)
+    PTOBufferHandle* buffer;      // Associated buffer handle (nullptr for SCALAR)
+    uint64_t scalar_value;        // Raw value for PTO_PARAM_SCALAR (e.g., encoded float, int size)
 };
 
 #endif // PTO_TYPES_H
