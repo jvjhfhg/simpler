@@ -1,14 +1,14 @@
 /**
- * PTO Runtime - Compatible Runtime Implementation
+ * PTO Runtime - Runtime Implementation (Phase 8: PTO-Only Mode)
  *
- * This is a Phase 1 implementation that mirrors host_build_graph for compatibility.
- * Later phases will add ring buffers, TensorMap, and other PTO-specific features.
+ * PTO mode is always enabled. The constructor auto-initializes TensorMap
+ * for automatic dependency tracking.
  */
 
 #include "runtime.h"
 
 // =============================================================================
-// Constructor
+// Constructor (auto-initializes PTO mode)
 // =============================================================================
 
 Runtime::Runtime() {
@@ -32,6 +32,7 @@ Runtime::Runtime() {
     block_dim = 0;
     sche_cpu_num = 1;
     tensor_pair_count = 0;
+    buffer_handle_count_ = 0;
 }
 
 // =============================================================================
@@ -190,11 +191,10 @@ void Runtime::clear_tensor_pairs() {
 }
 
 // =============================================================================
-// PTO API Implementation (Phase 4)
+// PTO API Implementation
 // =============================================================================
 
 void Runtime::pto_init() {
-    pto_mode_enabled_ = true;
     buffer_handle_count_ = 0;
 
     // Initialize TensorMap
@@ -231,8 +231,7 @@ void Runtime::pto_free(PTOBufferHandle* handle) {
     handle->ref_count--;
 
     if (handle->ref_count <= 0) {
-        // In full PTO mode (Phase 7), memory reclamation would be handled
-        // by the scheduler via HeapRing. For now, just mark as freed.
+        // Memory reclamation
         host_api.device_free((void*)handle->addr);
         handle->addr = 0;
     }
