@@ -54,6 +54,8 @@ Phase 5: Create PTO-native scheduler (behind feature flag)
 Phase 6: Create PTO-native example orchestration
      ↓
 Phase 7: Full PTO mode (new example, old example still works)
+     ↓
+Phase 8: Remove legacy mode, PTO is default
 ```
 
 ---
@@ -787,6 +789,50 @@ Complete the PTO runtime with all features:
 
 ---
 
+## 10b. Phase 8: Remove Legacy Mode, PTO Default
+
+### 10b.1 Goal
+
+Remove the legacy `add_task()` / `add_successor()` code path entirely. The PTO API (`pto_alloc`, `pto_submit_task`, etc.) becomes the only mode. The example runs PTO mode by default without any `--pto` flag.
+
+### 10b.2 Changes
+
+1. **`aicpu/aicpu_executor.cpp`**: Remove `AicpuExecutor` (legacy scheduler) and `legacy_scheduler_run()`. `aicpu_execute()` calls `pto_scheduler_run()` directly.
+
+2. **`runtime/runtime.h` / `runtime.cpp`**:
+   - Remove `add_task()`, `add_successor()`, `get_initial_ready_tasks()` legacy methods
+   - Remove `pto_mode_enabled_` flag and `is_pto_mode()` — PTO is always on
+   - `pto_init()` called automatically in constructor or made implicit
+
+3. **`examples/pto_runtime_sim_example/main.py`**:
+   - Remove `--pto` flag; PTO orchestration is the default
+   - Remove legacy orchestration selection from `kernel_config.py`
+
+4. **`examples/pto_runtime_sim_example/kernels/kernel_config.py`**:
+   - Single orchestration entry (PTO), remove `ORCHESTRATIONS` dict and `"legacy"` key
+
+5. **`examples/pto_runtime_sim_example/kernels/orchestration/example_orch.cpp`**:
+   - Remove legacy orchestration file (or keep as reference)
+
+### 10b.3 Test
+
+```bash
+PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
+# Expected: SUCCESS (using PTO mode, no flag needed)
+```
+
+### 10b.4 Test Matrix
+
+| Test | Result |
+|------|--------|
+| `main.py` (default, PTO) | ✓ PASS |
+| Diamond DAG | ✓ PASS |
+| Back-pressure | ✓ PASS |
+| In-place update (version_inc) | ✓ PASS |
+| Multi-producer buffer | ✓ PASS |
+
+---
+
 ## 11. Current Status
 
 | Phase | Description | Status | Test Passes |
@@ -796,9 +842,10 @@ Complete the PTO runtime with all features:
 | 2 | Ring buffer utilities (header) | ✓ COMPLETE | ✓ YES |
 | 3 | TensorMap (header) | ✓ COMPLETE | ✓ YES |
 | 4 | Dual-mode Runtime class | ✓ COMPLETE | ✓ YES |
-| 5 | PTO-native scheduler | PENDING | - |
+| 5 | PTO-native scheduler | ✓ COMPLETE | ✓ YES |
 | 6 | PTO-native orchestration | PENDING | - |
 | 7 | Full PTO mode | PENDING | - |
+| 8 | Remove legacy, PTO default | PENDING | - |
 
 ---
 
@@ -828,9 +875,10 @@ SUCCESS: All 16384 elements are correct (42.0)
 | 2 | Update `ring_buffer.h`, `dep_list_pool.h` | None ✓ (already existed from Phase 0) |
 | 3 | Add `tensor_map.h` (with strided overlap strategies) | None ✓ |
 | 4 | Update `runtime.h`, `runtime.cpp`, `pto_types.h` (add `pto_alloc`, `pto_free`, `pto_version_inc`, `pto_submit_task`) | New API (unused) ✓ |
-| 5 | Update `aicpu_executor.cpp` | PTO scheduler (unused) |
+| 5 | Update `aicpu_executor.cpp` with dual-mode routing | PTO scheduler (behind flag) ✓ |
 | 6 | Add `pto_example_orch.cpp`, update `kernel_config.py` | PTO orchestration |
 | 7 | Full integration (buffer ref counting, version control, strided overlap) | Complete PTO mode |
+| 8 | Remove `AicpuExecutor`, legacy API, `--pto` flag; update example to PTO default | PTO-only mode |
 
 ---
 
