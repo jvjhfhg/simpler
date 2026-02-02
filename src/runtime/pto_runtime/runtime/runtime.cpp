@@ -458,14 +458,16 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
     // Automatic dependency detection via TensorMap
     for (int32_t i = 0; i < param_count; i++) {
         if (params[i].type == PTOParamType::INPUT && params[i].buffer != nullptr) {
-            // INPUT: Look up producer for this tensor
-            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, 0);
+            // INPUT: Look up producer for this tensor (skip stale entries via shared_header_)
+            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor,
+                                                shared_header_.last_task_alive);
             if (producer >= 0 && producer != task_id) {
                 add_successor(producer, task_id);
             }
         } else if (params[i].type == PTOParamType::INOUT && params[i].buffer != nullptr) {
             // INOUT: Look up producer (like INPUT) but do NOT register as new producer
-            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, 0);
+            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor,
+                                                shared_header_.last_task_alive);
             if (producer >= 0 && producer != task_id) {
                 add_successor(producer, task_id);
             }

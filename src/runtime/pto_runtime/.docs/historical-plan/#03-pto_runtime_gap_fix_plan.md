@@ -37,7 +37,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | Phase 1: Task State Machine & Fanout Reference Counting | ✅ Completed | 2026-02-02 |
 | Phase 2: Scope End Logic | ✅ Completed | 2026-02-02 |
 | Phase 3: TaskRing and HeapRing Integration | ✅ Completed | 2026-02-02 |
-| Phase 4: PTOSharedHeader and TensorMap Staleness | ⏳ Pending | - |
+| Phase 4: PTOSharedHeader and TensorMap Staleness | ✅ Completed | 2026-02-02 |
 | Phase 5: Back-Pressure Flow Control | ⏳ Pending | - |
 | Phase 6: DepListPool Integration | ⏳ Pending | - |
 | Phase 7: Extended Worker Types | ⏳ Pending | - |
@@ -248,9 +248,18 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 4: PTOSharedHeader and TensorMap Staleness
+## Phase 4: PTOSharedHeader and TensorMap Staleness ✅ COMPLETED
+
+**Status:** ✅ Implemented and tested (2026-02-02)
+- All 57 Phase 4 tests passed
+- All Phase 1 (52), Phase 2 (102), Phase 3 (58) tests still pass
+- tensormap_lookup() now uses shared_header_.last_task_alive for staleness filtering
+- Scheduler advances last_task_alive and heap_tail after CONSUMED transitions
+- Stale TensorMap entries (producer_task_id < last_task_alive) are correctly skipped
 
 **Gaps addressed:** Gap 7 (PTOSharedHeader), Gap 8 (TensorMap Staleness)
+
+**Implementation Note:** Most of the shared_header_ infrastructure (member, get_shared_header(), zero-initialization, current_task_index/heap_top updates) was already added in Phase 3. Phase 4 completed the wiring by: (1) replacing hardcoded `0` in tensormap_lookup() calls with `shared_header_.last_task_alive`, and (2) adding last_task_alive and heap_tail advancement logic to the scheduler's task completion handler.
 
 **Rationale:** With TaskRing and HeapRing in place, wire up PTOSharedHeader for Orchestrator ↔ Scheduler communication. This enables TensorMap staleness filtering.
 
@@ -467,7 +476,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | 1 | #3 TaskState, #5 fanout_refcount | High | None | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` | ✅ Done |
 | 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ✅ Done |
-| 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
+| 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
 | 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
 | 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` | ⏳ |
