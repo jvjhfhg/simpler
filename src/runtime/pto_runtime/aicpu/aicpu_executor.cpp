@@ -256,6 +256,7 @@ int PtoScheduler::shutdown_cores(Runtime* runtime, int thread_idx, const int* cu
 
 int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const int* cur_thread_cores, int core_num) {
     Handshake* hank = (Handshake*)runtime.workers;
+    PTOSharedHeader* shared_header = runtime.get_shared_header();
 
     DEV_INFO("PTO Thread %d: Starting execution with %d cores", thread_idx, core_num);
 
@@ -328,6 +329,33 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                     if (producer != nullptr) {
                         producer->fanout_refcount++;
                         runtime.check_consumed(producer_id);
+                    }
+                }
+
+                // Phase 4 (Gap #7, #8): Advance last_task_alive and heap_tail
+                // Scan forward from current last_task_alive while tasks are CONSUMED
+                if (shared_header != nullptr) {
+                    int32_t last_alive = shared_header->last_task_alive;
+                    while (last_alive < task_count) {
+                        Task* t = runtime.get_task(last_alive);
+                        if (t == nullptr || t->state != TaskState::CONSUMED) {
+                            break;
+                        }
+                        last_alive++;
+                    }
+                    // Update shared header if we advanced
+                    if (last_alive > shared_header->last_task_alive) {
+                        shared_header->last_task_alive = last_alive;
+
+                        // Advance heap_tail based on last CONSUMED task's packed buffer
+                        if (last_alive > 0) {
+                            Task* last_consumed = runtime.get_task(last_alive - 1);
+                            if (last_consumed != nullptr) {
+                                int32_t new_heap_tail = last_consumed->packed_buffer_offset
+                                                      + last_consumed->packed_buffer_size;
+                                shared_header->heap_tail = new_heap_tail;
+                            }
+                        }
                     }
                 }
 
