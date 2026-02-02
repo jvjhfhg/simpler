@@ -23,8 +23,12 @@ Runtime::Runtime() {
         tasks[i].fanout_count = 0;
         tasks[i].start_time = 0;
         tasks[i].end_time = 0;
+        tasks[i].state = TaskState::PENDING;
+        tasks[i].fanout_refcount = 0;
+        tasks[i].fanin_producer_count = 0;
         memset(tasks[i].args, 0, sizeof(tasks[i].args));
         memset(tasks[i].fanout, 0, sizeof(tasks[i].fanout));
+        memset(tasks[i].fanin_producers, 0, sizeof(tasks[i].fanin_producers));
     }
     next_task_id = 0;
     initial_ready_count = 0;
@@ -34,6 +38,7 @@ Runtime::Runtime() {
     tensor_pair_count = 0;
     buffer_handle_count_ = 0;
     scope_stack_top_ = 0;
+    last_task_alive_ = 0;
 }
 
 // =============================================================================
@@ -64,6 +69,9 @@ int Runtime::add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType c
     task->core_type = static_cast<int>(core_type);
     task->fanin = 0;
     task->fanout_count = 0;
+    task->state = TaskState::PENDING;
+    task->fanout_refcount = 0;
+    task->fanin_producer_count = 0;
     memset(task->fanout, 0, sizeof(task->fanout));
 
     return task_id;
@@ -90,6 +98,13 @@ void Runtime::add_successor(int from_task, int to_task) {
 
     from->fanout[from->fanout_count++] = to_task;
     to->fanin++;
+
+    // Phase 1: Record reverse dependency (producer → consumer tracking)
+    if (to->fanin_producer_count < RUNTIME_MAX_ARGS) {
+        to->fanin_producers[to->fanin_producer_count++] = from_task;
+    } else {
+        fprintf(stderr, "[PTO Runtime] WARNING: fanin_producers overflow for task %d\n", to_task);
+    }
 }
 
 // =============================================================================
@@ -122,14 +137,32 @@ int Runtime::get_initial_ready_tasks(int* ready_tasks) {
 }
 
 // =============================================================================
+// Phase 1: Task Lifecycle Helpers (Gap #3, #5)
+// =============================================================================
+
+void Runtime::check_consumed(int task_id) {
+    if (task_id < 0 || task_id >= next_task_id) return;
+
+    Task* task = &tasks[task_id];
+    if (task->fanout_refcount == task->fanout_count &&
+        task->state == TaskState::COMPLETED) {
+        task->state = TaskState::CONSUMED;
+        printf("[PTO] Task %d → CONSUMED (fanout_refcount=%d == fanout_count=%d)\n",
+               task_id, task->fanout_refcount, task->fanout_count);
+    }
+}
+
+// =============================================================================
 // Utility Methods
 // =============================================================================
 
 void Runtime::print_runtime() const {
+    static const char* state_names[] = {"PENDING", "READY", "RUNNING", "COMPLETED", "CONSUMED"};
+
     printf("\n========================================================================\n");
     printf("[PTO Runtime] Task Runtime Status\n");
     printf("========================================================================\n");
-    printf("  Total tasks: %d\n", next_task_id);
+    printf("  Total tasks: %d, last_task_alive: %d\n", next_task_id, last_task_alive_);
 
     printf("\nInitially Ready Tasks (fanin==0):\n");
     printf("------------------------------------------------------------------------\n");
@@ -150,16 +183,21 @@ void Runtime::print_runtime() const {
     printf("\nTask Table:\n");
     printf("------------------------------------------------------------------------\n");
 
+    int consumed_count = 0;
     for (int i = 0; i < next_task_id; i++) {
         const Task* t = &tasks[i];
-        printf("  Task %d: func_id=%d, fanin=%d, fanout=%d, core_type=%d [",
-            i, t->func_id, t->fanin.load(), t->fanout_count, t->core_type);
+        int state_idx = static_cast<int>(t->state);
+        const char* state_str = (state_idx >= 0 && state_idx <= 4) ? state_names[state_idx] : "UNKNOWN";
+        printf("  Task %d: func_id=%d, state=%s, fanin=%d, fanout=%d, fanout_refcount=%d, core_type=%d [",
+            i, t->func_id, state_str, t->fanin.load(), t->fanout_count, t->fanout_refcount, t->core_type);
         for (int j = 0; j < t->fanout_count; j++) {
             printf("%d%s", t->fanout[j], j < t->fanout_count - 1 ? "," : "");
         }
         printf("]\n");
+        if (t->state == TaskState::CONSUMED) consumed_count++;
     }
 
+    printf("\n  CONSUMED tasks: %d / %d\n", consumed_count, next_task_id);
     printf("========================================================================\n\n");
 }
 
@@ -319,6 +357,11 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
             tensormap_insert(&tensor_map_, &params[i].tensor,
                            task_id, params[i].buffer->version);
         }
+    }
+
+    // Phase 1 (Gap #3): Set READY if no dependencies
+    if (tasks[task_id].fanin.load(std::memory_order_acquire) == 0) {
+        tasks[task_id].state = TaskState::READY;
     }
 
     return task_id;

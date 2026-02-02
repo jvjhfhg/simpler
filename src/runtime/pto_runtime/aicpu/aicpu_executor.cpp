@@ -299,6 +299,9 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                 Task* task = reinterpret_cast<Task*>(h->task);
                 h->task = 0;  // Clear task pointer
 
+                // Phase 1 (Gap #3): Transition to COMPLETED
+                task->state = TaskState::COMPLETED;
+
                 DEV_INFO("PTO Thread %d: Core %d completed task %d", thread_idx, core_id, task->task_id);
 
                 // Notify dependent tasks (decrement their fanin)
@@ -310,9 +313,21 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
 
                     // If this was the last dependency, task becomes ready
                     if (prev_fanin == 1) {
+                        // Phase 1 (Gap #3): Transition dependent to READY
+                        dep->state = TaskState::READY;
                         int worker_type = dep->core_type;
                         enqueue_ready_task(dep_id, worker_type);
                         DEV_INFO("PTO Thread %d: Task %d now ready (worker_type=%d)", thread_idx, dep_id, worker_type);
+                    }
+                }
+
+                // Phase 1 (Gap #5): Increment fanout_refcount for each producer
+                for (int j = 0; j < task->fanin_producer_count; j++) {
+                    int producer_id = task->fanin_producers[j];
+                    Task* producer = runtime.get_task(producer_id);
+                    if (producer != nullptr) {
+                        producer->fanout_refcount++;
+                        runtime.check_consumed(producer_id);
                     }
                 }
 
@@ -340,6 +355,9 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                         int task_id = dequeue_ready_task(worker_type);
                         if (task_id >= 0) {
                             Task* task = runtime.get_task(task_id);
+
+                            // Phase 1 (Gap #3): Transition to RUNNING
+                            task->state = TaskState::RUNNING;
 
                             h->task = reinterpret_cast<uint64_t>(task);
                             h->task_status = 1;  // Mark as busy
