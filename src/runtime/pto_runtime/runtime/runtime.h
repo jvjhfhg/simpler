@@ -4,8 +4,9 @@
  * This provides a Runtime class compatible with the existing platform layer,
  * allowing the PTO runtime to work with the same infrastructure as host_build_graph.
  *
- * PTO API: pto_alloc(), pto_submit_task(), pto_free(), pto_version_inc()
+ * PTO API: pto_scope_begin(), pto_scope_end(), pto_submit_task(), pto_version_inc()
  * Dependencies are detected automatically via TensorMap.
+ * Memory allocation is implicit during pto_submit_task() for OUTPUT params.
  *
  * Note: Legacy API (add_task/add_successor) is retained for internal use by
  * pto_submit_task() but PTO mode is always enabled.
@@ -159,14 +160,10 @@ public:
     // Initialize PTO mode (called automatically in constructor)
     void pto_init();
 
-    // --- Buffer Management ---
-    // Allocate buffer handle, returns handle with address
-    // Address is available BEFORE task submission (required for dependent tasks)
-    PTOBufferHandle* pto_alloc(int32_t size);
-
-    // Signal "no more references will be added" (does NOT immediately free)
-    // Device recycles memory after all consumers finish
-    void pto_free(PTOBufferHandle* handle);
+    // --- Scope-Based Lifecycle ---
+    // Scope controls buffer lifetime (fanout initialized to scope_depth)
+    void pto_scope_begin();
+    void pto_scope_end();
 
     // --- Version Control for In-Place Updates ---
     // Returns new versioned handle (SSA-style)
@@ -175,6 +172,7 @@ public:
 
     // --- Task Submission ---
     // Submit task with automatic dependency detection via TensorMap
+    // OUTPUT params are allocated implicitly by runtime
     int pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
                         PTOParam* params, int32_t param_count);
 
@@ -188,7 +186,11 @@ private:
     TensorMapEntry tensormap_pool_[PTO_TENSORMAP_POOL_SIZE];
     int32_t tensormap_buckets_[PTO_TENSORMAP_NUM_BUCKETS];
 
-    // Buffer handle tracking
+    // Scope stack for buffer lifetime management
+    int32_t scope_stack_[PTO_MAX_SCOPE_DEPTH];
+    int32_t scope_stack_top_ = 0;
+
+    // Buffer handle tracking (for version_inc)
     PTOBufferHandle buffer_handles_[PTO_TENSORMAP_POOL_SIZE];
     int32_t buffer_handle_count_ = 0;
 };

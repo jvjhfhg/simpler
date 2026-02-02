@@ -294,38 +294,13 @@ struct TensorPair {
 // =============================================================================
 // Runtime Parameter Types (for pto_submit_task API)
 // =============================================================================
-
-/**
- * Parameter Type - Distinguishes inputs from outputs
- */
-enum class PTOParamType : int32_t {
-    INPUT  = 0,  // Read-only input buffer
-    OUTPUT = 1   // Write-only output buffer
-};
-
-/**
- * Parameter Descriptor - Describes input/output for task submission
- *
- * For INPUT:  base_ptr + offset points to existing buffer
- * For OUTPUT: ptr_to_ptr will receive allocated buffer address
- *
- * Example usage:
- *   void* C = NULL;
- *   PTOParam params[] = {
- *       {PTOParamType::INPUT,  (uint64_t)A, 0, size_A, NULL},
- *       {PTOParamType::INPUT,  (uint64_t)B, 0, size_B, NULL},
- *       {PTOParamType::OUTPUT, 0, 0, size_C, &C}  // Runtime writes address to C
- *   };
- *   pto_submit_task(orch, func_id, worker_type, params, 3);
- *   // After return, C contains allocated device buffer address
- */
-struct PTOParam {
-    PTOParamType type;      // PTOParamType::INPUT or PTOParamType::OUTPUT
-    uint64_t base_ptr;      // For INPUT: buffer address; for OUTPUT: unused
-    int32_t offset;         // Byte offset within buffer
-    int32_t size;           // Size in bytes
-    void** ptr_to_ptr;      // For OUTPUT: receives allocated address; for INPUT: unused
-};
+//
+// NOTE: PTOParamType and PTOParam are defined in pto_types.h
+// The canonical definitions are:
+//   - PTOParamType: INPUT, OUTPUT, SCALAR, INOUT
+//   - PTOParam: with tensor descriptor, buffer handle, and scalar_value
+//
+// See pto_types.h for details. Do NOT re-define here to avoid conflicts.
 
 // =============================================================================
 // Forward Declarations (implementations in separate files)
