@@ -36,7 +36,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 |-------|--------|------|
 | Phase 1: Task State Machine & Fanout Reference Counting | ✅ Completed | 2026-02-02 |
 | Phase 2: Scope End Logic | ✅ Completed | 2026-02-02 |
-| Phase 3: TaskRing and HeapRing Integration | ⏳ Pending | - |
+| Phase 3: TaskRing and HeapRing Integration | ✅ Completed | 2026-02-02 |
 | Phase 4: PTOSharedHeader and TensorMap Staleness | ⏳ Pending | - |
 | Phase 5: Back-Pressure Flow Control | ⏳ Pending | - |
 | Phase 6: DepListPool Integration | ⏳ Pending | - |
@@ -161,7 +161,15 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 3: TaskRing and HeapRing Integration
+## Phase 3: TaskRing and HeapRing Integration ✅ COMPLETED
+
+**Status:** ✅ Implemented and tested (2026-02-02)
+- All 58 Phase 3 tests passed
+- All Phase 1 (52) and Phase 2 (102) tests still pass
+- Packed output buffer allocation via HeapRing working correctly
+- TaskRing and HeapRing initialized via pto_init_rings()
+- Shared header tracks current_task_index and heap_top
+- Legacy mode (without pto_init_rings) still supported
 
 **Gaps addressed:** Gap 1 (Task Ring Buffer), Gap 2 (GM Heap / HeapRing), Gap 11 (Packed Output Buffers)
 
@@ -458,7 +466,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 |-------|-----------|----------|-------------|-------------------|--------|
 | 1 | #3 TaskState, #5 fanout_refcount | High | None | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` | ✅ Done |
-| 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ⏳ |
+| 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ✅ Done |
 | 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
 | 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
 | 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |

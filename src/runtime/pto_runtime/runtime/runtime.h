@@ -22,6 +22,7 @@
 #include <atomic>
 
 #include "tensor_map.h"  // TensorMap, TensorMapEntry, PTOTensorDescriptor, PTOBufferHandle, PTOParam
+#include "ring_buffer.h" // TaskRing, HeapRing, PTOSharedHeader, TaskState, Handshake, etc.
 
 // =============================================================================
 // Configuration Macros
@@ -51,67 +52,15 @@
 // Data Structures
 // =============================================================================
 
-/**
- * Handshake buffer for AICPU-AICore communication
- *
- * Protocol:
- * 1. AICPU sets aicpu_ready=1
- * 2. AICore sets aicore_done=core_id+1
- * 3. AICPU assigns task pointer and sets task_status=1
- * 4. AICore executes, sets task_status=0
- * 5. AICPU clears task=0
- * 6. AICPU sets control=1 to shutdown
- */
-struct Handshake {
-    volatile uint32_t aicpu_ready;
-    volatile uint32_t aicore_done;
-    volatile uint64_t task;
-    volatile int32_t task_status;
-    volatile int32_t control;
-    volatile int32_t core_type;
-} __attribute__((aligned(64)));
+// Note: Handshake, TensorPair, HostApi, TaskState are defined in pto_runtime.h
+// (included via ring_buffer.h) to avoid duplication.
 
 /**
- * Core type enumeration
+ * Core type enumeration (legacy, maps to PTOWorkerType)
  */
 enum class CoreType : int {
     AIC = 0,
     AIV = 1
-};
-
-/**
- * Tensor pair for tracking host-device memory mappings
- */
-struct TensorPair {
-    void* host_ptr;
-    void* dev_ptr;
-    size_t size;
-};
-
-/**
- * Host API function pointers for device memory operations
- */
-struct HostApi {
-    void* (*device_malloc)(size_t size);
-    void (*device_free)(void* dev_ptr);
-    int (*copy_to_device)(void* dev_ptr, const void* host_ptr, size_t size);
-    int (*copy_from_device)(void* host_ptr, const void* dev_ptr, size_t size);
-};
-
-/**
- * Task State Machine (Phase 1: Gap #3)
- *
- * PENDING → READY → RUNNING → COMPLETED → CONSUMED
- *
- * See pto_runtime.h for the design-target TaskState definition.
- * Defined here to avoid include conflicts with pto_runtime.h.
- */
-enum class TaskState : int32_t {
-    PENDING   = 0,  // Waiting for dependencies
-    READY     = 1,  // All dependencies met, in ready queue
-    RUNNING   = 2,  // Executing on worker
-    COMPLETED = 3,  // Execution done, may have live consumers
-    CONSUMED  = 4   // All consumers done, buffer can be freed
 };
 
 /**
@@ -135,6 +84,10 @@ typedef struct {
     int fanout_refcount;                        // Completed consumers + scope_end count
     int fanin_producers[RUNTIME_MAX_ARGS];      // Reverse dep list (replaced by DepListPool in Phase 6)
     int fanin_producer_count;                   // Count of producers
+
+    // Phase 3: Packed output buffer tracking (Gap #11)
+    int32_t packed_buffer_offset;               // Offset in HeapRing (for heap reclamation)
+    int32_t packed_buffer_size;                 // Total size of packed outputs
 } Task;
 
 // =============================================================================
@@ -228,6 +181,22 @@ private:
     // Buffer handle tracking (for version_inc)
     PTOBufferHandle buffer_handles_[PTO_TENSORMAP_POOL_SIZE];
     int32_t buffer_handle_count_ = 0;
+
+    // Phase 3: Ring Buffers for task and heap allocation (Gap #1, #2, #11)
+    TaskRing task_ring_;
+    PTOTaskDescriptor task_descriptors_[PTO_TASK_WINDOW_SIZE];
+    HeapRing heap_ring_;
+    char* heap_base_;                           // Device memory base for HeapRing
+    bool use_ring_allocation_ = false;          // Enable ring allocation after pto_init_rings()
+
+public:
+    // Phase 3: Initialize ring buffers (separate from pto_init for gradual migration)
+    void pto_init_rings();
+    PTOSharedHeader* get_shared_header() { return &shared_header_; }
+
+private:
+    // Phase 3+4: Shared header for Orchestrator ↔ Scheduler communication
+    PTOSharedHeader shared_header_;
 };
 
 #endif  // RUNTIME_H
