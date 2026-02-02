@@ -35,7 +35,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | Phase | Status | Date |
 |-------|--------|------|
 | Phase 1: Task State Machine & Fanout Reference Counting | ✅ Completed | 2026-02-02 |
-| Phase 2: Scope End Logic | ⏳ Pending | - |
+| Phase 2: Scope End Logic | ✅ Completed | 2026-02-02 |
 | Phase 3: TaskRing and HeapRing Integration | ⏳ Pending | - |
 | Phase 4: PTOSharedHeader and TensorMap Staleness | ⏳ Pending | - |
 | Phase 5: Back-Pressure Flow Control | ⏳ Pending | - |
@@ -104,7 +104,16 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 2: Scope End Logic with Fanout Decrement
+## Phase 2: Scope End Logic with Fanout Decrement ✅ COMPLETED
+
+**Status:** ✅ Implemented and tested (2026-02-02)
+- All 64 Phase 2 tests passed
+- All 52 Phase 1 tests still pass (updated for Phase 2 compatibility)
+- scope_end() now increments both `fanout_count` and `fanout_refcount` for tasks in scope
+- CONSUMED transition: `fanout_refcount == fanout_count` (simple comparison)
+- Nested scopes work correctly (inner scope affects inner tasks, outer scope affects all)
+
+**Implementation Note:** The original plan suggested adding `scope_stack_top_` to `fanout_count` at submission time. However, since `fanout_count` is also used as the write-index for the `fanout[]` array in `add_successor()`, this would corrupt the array. Instead, `scope_end()` increments both `fanout_count` and `fanout_refcount` at scope-end time, when no more successors will be added.
 
 **Gaps addressed:** Gap 4 (Scope Management)
 
@@ -448,7 +457,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | Phase | Gaps Fixed | Priority | Dependencies | Key Files Modified | Status |
 |-------|-----------|----------|-------------|-------------------|--------|
 | 1 | #3 TaskState, #5 fanout_refcount | High | None | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
-| 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` | ⏳ |
+| 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` | ✅ Done |
 | 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ⏳ |
 | 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
 | 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |

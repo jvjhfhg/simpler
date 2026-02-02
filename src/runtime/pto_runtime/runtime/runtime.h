@@ -126,7 +126,7 @@ typedef struct {
     int core_type;
     std::atomic<int> fanin;
     int fanout[RUNTIME_MAX_FANOUT];
-    int fanout_count;
+    int fanout_count;                           // Array length: number of entries in fanout[]
     uint64_t start_time;
     uint64_t end_time;
 
@@ -215,8 +215,15 @@ private:
     int32_t tensormap_buckets_[PTO_TENSORMAP_NUM_BUCKETS];
 
     // Scope stack for buffer lifetime management
+    // scope_stack_[i] = index into scope_tasks_ where scope i's task list begins
     int32_t scope_stack_[PTO_MAX_SCOPE_DEPTH];
     int32_t scope_stack_top_ = 0;
+
+    // Flat list of task IDs per scope (stack-allocated, RAII pop on scope_end)
+    // Each scope owns a contiguous slice [scope_stack_[depth], scope_tasks_top_)
+    // When a child scope ends, its slice is removed, so parent never sees child's tasks
+    int32_t scope_tasks_[RUNTIME_MAX_TASKS];
+    int32_t scope_tasks_top_ = 0;
 
     // Buffer handle tracking (for version_inc)
     PTOBufferHandle buffer_handles_[PTO_TENSORMAP_POOL_SIZE];

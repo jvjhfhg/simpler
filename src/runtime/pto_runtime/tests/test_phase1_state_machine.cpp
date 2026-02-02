@@ -209,18 +209,18 @@ static void test_state_initialization() {
     CHECK(task2->fanin.load() == 1, "T2 fanin = 1 (from T0)");
     CHECK(task3->fanin.load() == 2, "T3 fanin = 2 (from T1, T2)");
 
-    // Verify fanout counts (T0 → T1, T2; scope adds 1 per task)
-    // Note: scope_end doesn't add to fanout_count in Phase 1 (that's Phase 2)
+    // Verify fanout_count (array length: real consumers only)
+    // CONSUMED target = fanout_count + 1 (scope ref)
     CHECK(task0->fanout_count == 2, "T0 fanout_count = 2 (T1, T2)");
     CHECK(task1->fanout_count == 1, "T1 fanout_count = 1 (T3)");
     CHECK(task2->fanout_count == 1, "T2 fanout_count = 1 (T3)");
     CHECK(task3->fanout_count == 0, "T3 fanout_count = 0 (leaf)");
 
-    // Verify fanout_refcount (all 0 initially)
-    CHECK(task0->fanout_refcount == 0, "T0 fanout_refcount = 0");
-    CHECK(task1->fanout_refcount == 0, "T1 fanout_refcount = 0");
-    CHECK(task2->fanout_refcount == 0, "T2 fanout_refcount = 0");
-    CHECK(task3->fanout_refcount == 0, "T3 fanout_refcount = 0");
+    // Verify fanout_refcount (scope_end already called → all have 1)
+    CHECK(task0->fanout_refcount == 1, "T0 fanout_refcount = 1 (scope)");
+    CHECK(task1->fanout_refcount == 1, "T1 fanout_refcount = 1 (scope)");
+    CHECK(task2->fanout_refcount == 1, "T2 fanout_refcount = 1 (scope)");
+    CHECK(task3->fanout_refcount == 1, "T3 fanout_refcount = 1 (scope)");
 
     // Verify fanin_producers (reverse dependency tracking)
     CHECK(task0->fanin_producer_count == 0, "T0 has 0 producers");
@@ -353,8 +353,8 @@ static void test_state_transitions() {
         producer->fanout_refcount++;
         runtime.check_consumed(producer_id);
     }
-    CHECK(task0->fanout_refcount == 1, "T0 fanout_refcount = 1 (T1 completed)");
-    CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (fanout_refcount=1 < fanout_count=2)");
+    CHECK(task0->fanout_refcount == 2, "T0 fanout_refcount = 2 (T1 + scope)");
+    CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (fanout_refcount=2 < fanout_count+1=3)");
 
     // --- Simulate: Dispatch and complete T2 ---
     printf("\n--- Dispatch+Complete T2 ---\n");
@@ -379,8 +379,8 @@ static void test_state_transitions() {
         producer->fanout_refcount++;
         runtime.check_consumed(producer_id);
     }
-    CHECK(task0->fanout_refcount == 2, "T0 fanout_refcount = 2 (T1+T2 completed)");
-    CHECK(task0->state == TaskState::CONSUMED, "T0 → CONSUMED (fanout_refcount=2 == fanout_count=2)");
+    CHECK(task0->fanout_refcount == 3, "T0 fanout_refcount = 3 (T1+T2+scope)");
+    CHECK(task0->state == TaskState::CONSUMED, "T0 → CONSUMED (fanout_refcount=3 == fanout_count+1=3)");
 
     // --- Simulate: Dispatch and complete T3 ---
     printf("\n--- Dispatch+Complete T3 ---\n");
@@ -394,16 +394,14 @@ static void test_state_transitions() {
         producer->fanout_refcount++;
         runtime.check_consumed(producer_id);
     }
-    CHECK(task1->fanout_refcount == 1, "T1 fanout_refcount = 1 (T3 completed)");
-    CHECK(task1->state == TaskState::CONSUMED, "T1 → CONSUMED (fanout_refcount=1 == fanout_count=1)");
-    CHECK(task2->fanout_refcount == 1, "T2 fanout_refcount = 1 (T3 completed)");
-    CHECK(task2->state == TaskState::CONSUMED, "T2 → CONSUMED (fanout_refcount=1 == fanout_count=1)");
+    CHECK(task1->fanout_refcount == 2, "T1 fanout_refcount = 2 (T3+scope)");
+    CHECK(task1->state == TaskState::CONSUMED, "T1 → CONSUMED (fanout_refcount=2 == fanout_count+1=2)");
+    CHECK(task2->fanout_refcount == 2, "T2 fanout_refcount = 2 (T3+scope)");
+    CHECK(task2->state == TaskState::CONSUMED, "T2 → CONSUMED (fanout_refcount=2 == fanout_count+1=2)");
 
-    // T3 has fanout_count=0 and state=COMPLETED → should be CONSUMED immediately
-    // But check_consumed is only called by consumers, and T3 has none.
-    // T3 has fanout_count=0, so fanout_refcount(0) == fanout_count(0) → CONSUMED
+    // T3 has fanout_count=0, so target=1 (scope). fanout_refcount=1 (scope) → CONSUMED
     runtime.check_consumed(t3);
-    CHECK(task3->state == TaskState::CONSUMED, "T3 → CONSUMED (leaf: fanout_refcount=0 == fanout_count=0)");
+    CHECK(task3->state == TaskState::CONSUMED, "T3 → CONSUMED (fanout_refcount=1 == fanout_count+1=1)");
 
     printf("\n--- Final State ---\n");
     runtime.print_runtime();
@@ -457,8 +455,8 @@ static void test_chain_topology() {
 
     CHECK(taskA->state == TaskState::READY, "A starts READY");
     CHECK(taskB->state == TaskState::PENDING, "B starts PENDING");
-    CHECK(taskA->fanout_count == 1, "A fanout_count = 1");
-    CHECK(taskB->fanin_producer_count == 1, "B has 1 producer (A)");
+    CHECK(taskA->fanout_count == 1, "A fanout_count = 1 (B)");
+    CHECK(taskB->fanout_count == 0, "B fanout_count = 0 (leaf)");
 
     // Simulate: A runs and completes
     taskA->state = TaskState::RUNNING;
