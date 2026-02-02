@@ -1,23 +1,23 @@
 # Divergence to The Original Orchestration Implementation
 
-1. **Add explicit `pto_alloc()` API**
+1. **Add explicit `pto_alloc()` API** (TOTALLY WRONG)
     - Orchestration function needs buffer address BEFORE submitting tasks
     - Cannot use implicit allocation (inside submit) because address must be passed to dependent tasks
 
-2. **Add explicit `pto_free()` API**
+2. **Add explicit `pto_free()` API** (TOTALLY WRONG)
     - Does NOT immediately free memory
     - Signals "no more references will be added to this buffer"
     - Device recycles memory at its discretion after all usage finishes
 
-3. **Deprecate scope-based lifecycle**
+3. **Deprecate scope-based lifecycle** (TOTALLY WRONG)
     - Scope (`pto_scope_begin` / `pto_scope_end`) is no longer needed
     - Buffer lifetime is fully managed by explicit `pto_alloc()` / `pto_free()` paired with buffer-level reference counting (see §5)
 
 4. **Two sources of buffer addresses for INCORE calls**
-    - Runtime-allocated: via `pto_alloc()`
+    - Runtime-allocated: via `pto_alloc()` (TOTALLY WRONG)
     - External: from orchestration function's parameter list (passed in by caller)
 
-5. **Buffer lifecycle needs its own consumer tracking**
+5. **Buffer lifecycle needs its own consumer tracking** (TOTALLY WRONG)
     - Cannot rely on producer's fanout counter: a buffer may have multiple producers
     - Explicitly allocated buffers require buffer-level reference counting, independent of task-level fanout
 
@@ -64,3 +64,15 @@
     If both had StridedExact, we could compare element-by-element
     and potentially determine they do NOT overlap — but at higher cost.
     ```
+
+# Correct the doc
+
+Some parts of this doc is incorrect:
+
+- No explicit `alloc` interface, the consideration is that memory allocation SHOULDN'T be sequential. It should be dynamically controlled, be scheduled with the tasks together.
+- Since no `alloc`, no `free` would be reasonable.
+- Function using the buffer via INOUT paramater shouldn't be considered as a PRODUCER. It does WRITE to the existing buffer, but no PRODUCING.
+- Use `scope` to control the lifetime of produced buffers.
+- Task OUTPUT buffers should be allocated ONCE, meaning if a task produces buffer A and buffer B, there should be only one allocation , then buffer A and buffer B will be located next to each other via a simple offset. (You can say a suballocation if you like it)
+- Task output buffer size can limit it's execution/scheduling.
+
