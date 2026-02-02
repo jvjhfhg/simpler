@@ -99,6 +99,22 @@ struct HostApi {
 };
 
 /**
+ * Task State Machine (Phase 1: Gap #3)
+ *
+ * PENDING → READY → RUNNING → COMPLETED → CONSUMED
+ *
+ * See pto_runtime.h for the design-target TaskState definition.
+ * Defined here to avoid include conflicts with pto_runtime.h.
+ */
+enum class TaskState : int32_t {
+    PENDING   = 0,  // Waiting for dependencies
+    READY     = 1,  // All dependencies met, in ready queue
+    RUNNING   = 2,  // Executing on worker
+    COMPLETED = 3,  // Execution done, may have live consumers
+    CONSUMED  = 4   // All consumers done, buffer can be freed
+};
+
+/**
  * Task entry in the runtime
  */
 typedef struct {
@@ -113,6 +129,12 @@ typedef struct {
     int fanout_count;
     uint64_t start_time;
     uint64_t end_time;
+
+    // Phase 1: Task State Machine (Gap #3) and Fanout Reference Counting (Gap #5)
+    TaskState state;                            // Explicit task state (default: PENDING)
+    int fanout_refcount;                        // Completed consumers + scope_end count
+    int fanin_producers[RUNTIME_MAX_ARGS];      // Reverse dep list (replaced by DepListPool in Phase 6)
+    int fanin_producer_count;                   // Count of producers
 } Task;
 
 // =============================================================================
@@ -143,6 +165,9 @@ public:
     // Internal task management (used by pto_submit_task)
     int add_task(uint64_t *args, int num_args, int func_id, PTOWorkerType core_type = PTOWorkerType::VECTOR);
     void add_successor(int from_task, int to_task);
+
+    // Phase 1: Task lifecycle helpers
+    void check_consumed(int task_id);
 
     Task *get_task(int task_id);
     int get_task_count() const;
@@ -180,6 +205,9 @@ public:
 
 private:
     // === PTO Internal State ===
+
+    // Phase 1: Oldest non-CONSUMED task (Gap #3)
+    int32_t last_task_alive_;
 
     // TensorMap for automatic dependency tracking
     TensorMap tensor_map_;

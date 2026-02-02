@@ -30,7 +30,27 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 1: Task State Machine and Fanout Reference Counting
+## Current Progress
+
+| Phase | Status | Date |
+|-------|--------|------|
+| Phase 1: Task State Machine & Fanout Reference Counting | ✅ Completed | 2026-02-02 |
+| Phase 2: Scope End Logic | ⏳ Pending | - |
+| Phase 3: TaskRing and HeapRing Integration | ⏳ Pending | - |
+| Phase 4: PTOSharedHeader and TensorMap Staleness | ⏳ Pending | - |
+| Phase 5: Back-Pressure Flow Control | ⏳ Pending | - |
+| Phase 6: DepListPool Integration | ⏳ Pending | - |
+| Phase 7: Extended Worker Types | ⏳ Pending | - |
+
+---
+
+## Phase 1: Task State Machine and Fanout Reference Counting ✅ COMPLETED
+
+**Status:** ✅ Implemented and tested (2026-02-02)
+- All 52 tests passed
+- State transitions: PENDING → READY → RUNNING → COMPLETED → CONSUMED working correctly
+- Fanout reference counting properly tracks consumer completions
+- Commit: `57d38c4`
 
 **Gaps addressed:** Gap 3 (Task State Machine), Gap 5 (Fanout Reference Counting)
 
@@ -425,15 +445,15 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ## Summary Table
 
-| Phase | Gaps Fixed | Priority | Dependencies | Key Files Modified |
-|-------|-----------|----------|-------------|-------------------|
-| 1 | #3 TaskState, #5 fanout_refcount | High | None | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` |
-| 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` |
-| 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` |
-| 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` |
-| 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` |
-| 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` |
-| 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` |
+| Phase | Gaps Fixed | Priority | Dependencies | Key Files Modified | Status |
+|-------|-----------|----------|-------------|-------------------|--------|
+| 1 | #3 TaskState, #5 fanout_refcount | High | None | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
+| 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` | ⏳ |
+| 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ⏳ |
+| 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
+| 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
+| 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
+| 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` | ⏳ |
 
 ---
 
