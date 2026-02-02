@@ -38,6 +38,7 @@ Runtime::Runtime() {
     tensor_pair_count = 0;
     buffer_handle_count_ = 0;
     scope_stack_top_ = 0;
+    scope_tasks_top_ = 0;
     last_task_alive_ = 0;
 }
 
@@ -144,11 +145,13 @@ void Runtime::check_consumed(int task_id) {
     if (task_id < 0 || task_id >= next_task_id) return;
 
     Task* task = &tasks[task_id];
-    if (task->fanout_refcount == task->fanout_count &&
+    // Target = fanout_count + 1 (real consumers + scope ref)
+    int target = task->fanout_count + 1;
+    if (task->fanout_refcount == target &&
         task->state == TaskState::COMPLETED) {
         task->state = TaskState::CONSUMED;
-        printf("[PTO] Task %d → CONSUMED (fanout_refcount=%d == fanout_count=%d)\n",
-               task_id, task->fanout_refcount, task->fanout_count);
+        printf("[PTO] Task %d → CONSUMED (fanout_refcount=%d == fanout_count+1=%d)\n",
+               task_id, task->fanout_refcount, target);
     }
 }
 
@@ -188,7 +191,7 @@ void Runtime::print_runtime() const {
         const Task* t = &tasks[i];
         int state_idx = static_cast<int>(t->state);
         const char* state_str = (state_idx >= 0 && state_idx <= 4) ? state_names[state_idx] : "UNKNOWN";
-        printf("  Task %d: func_id=%d, state=%s, fanin=%d, fanout=%d, fanout_refcount=%d, core_type=%d [",
+        printf("  Task %d: func_id=%d, state=%s, fanin=%d, fanout_count=%d, fanout_refcount=%d, core_type=%d [",
             i, t->func_id, state_str, t->fanin.load(), t->fanout_count, t->fanout_refcount, t->core_type);
         for (int j = 0; j < t->fanout_count; j++) {
             printf("%d%s", t->fanout[j], j < t->fanout_count - 1 ? "," : "");
@@ -236,6 +239,7 @@ void Runtime::clear_tensor_pairs() {
 void Runtime::pto_init() {
     buffer_handle_count_ = 0;
     scope_stack_top_ = 0;
+    scope_tasks_top_ = 0;
 
     // Initialize TensorMap
     tensormap_init(&tensor_map_, tensormap_pool_, PTO_TENSORMAP_POOL_SIZE,
@@ -254,9 +258,9 @@ void Runtime::pto_scope_begin() {
         fprintf(stderr, "[PTO] ERROR: Scope stack overflow (max=%d)\n", PTO_MAX_SCOPE_DEPTH);
         return;
     }
-    // Record current task index at scope entry
-    scope_stack_[scope_stack_top_++] = next_task_id;
-    printf("[PTO] Scope begin (depth=%d, start_task=%d)\n", scope_stack_top_, next_task_id);
+    // Record current position in scope_tasks_ — this scope owns tasks from here onward
+    scope_stack_[scope_stack_top_++] = scope_tasks_top_;
+    printf("[PTO] Scope begin (depth=%d, scope_tasks_start=%d)\n", scope_stack_top_, scope_tasks_top_);
 }
 
 void Runtime::pto_scope_end() {
@@ -265,15 +269,32 @@ void Runtime::pto_scope_end() {
         return;
     }
 
-    int32_t begin_pos = scope_stack_[--scope_stack_top_];
-    int32_t end_pos = next_task_id;
+    int32_t tasks_begin = scope_stack_[--scope_stack_top_];
+    int32_t tasks_end = scope_tasks_top_;
 
-    printf("[PTO] Scope end (depth=%d, tasks %d-%d)\n",
-           scope_stack_top_ + 1, begin_pos, end_pos - 1);
+    printf("[PTO] Scope end (depth=%d, %d tasks)\n",
+           scope_stack_top_ + 1, tasks_end - tasks_begin);
 
-    // Note: In full implementation, this would decrement fanout_refcount
-    // for all tasks in [begin_pos, end_pos) and check for CONSUMED transition.
-    // For simulation, tasks are cleaned up at the end of execution.
+    // Scope releases its reference on each task it directly owns
+    // Only tasks pushed to scope_tasks_ by this scope are iterated (RAII)
+    for (int32_t i = tasks_begin; i < tasks_end; i++) {
+        int32_t tid = scope_tasks_[i];
+        tasks[tid].fanout_refcount++;
+        int target = tasks[tid].fanout_count + 1;
+        printf("[PTO] Task %d: fanout_refcount++ → %d (scope_end, target=%d)\n",
+               tid, tasks[tid].fanout_refcount, target);
+
+        // Check if task can transition to CONSUMED
+        if (tasks[tid].fanout_refcount == target &&
+            tasks[tid].state == TaskState::COMPLETED) {
+            tasks[tid].state = TaskState::CONSUMED;
+            printf("[PTO] Task %d → CONSUMED (via scope_end: fanout_refcount=%d == fanout_count+1=%d)\n",
+                   tid, tasks[tid].fanout_refcount, target);
+        }
+    }
+
+    // Pop this scope's tasks off the flat list (RAII: child scope tasks already gone)
+    scope_tasks_top_ = tasks_begin;
 }
 
 PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
@@ -332,6 +353,19 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
     // Phase 3: Add task using legacy API
     int task_id = add_task(args, num_args, func_id, worker_type);
     if (task_id < 0) return -1;
+
+    // Tasks must be submitted inside a scope
+    if (scope_stack_top_ <= 0) {
+        fprintf(stderr, "[PTO] ERROR: Task %d submitted outside of scope\n", task_id);
+        return -1;
+    }
+
+    // Push task onto the current scope's task list
+    if (scope_tasks_top_ < RUNTIME_MAX_TASKS) {
+        scope_tasks_[scope_tasks_top_++] = task_id;
+    } else {
+        fprintf(stderr, "[PTO] ERROR: scope_tasks_ overflow\n");
+    }
 
     // Phase 4: Automatic dependency detection via TensorMap
     for (int32_t i = 0; i < param_count; i++) {
