@@ -21,6 +21,7 @@ Each developer role has a designated working directory. Stay within your assigne
 1. **Do not modify directories outside your assigned area** unless the user explicitly requests it
 2. Create new subdirectories under your assigned directory as needed
 3. When in doubt, ask the user before making changes to other areas
+4. **Avoid including private information in documentation** such as usernames, absolute paths with usernames, or other personally identifiable information. Use relative paths or generic placeholders instead
 
 ## Coding Standards
 

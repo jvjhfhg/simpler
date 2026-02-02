@@ -17,7 +17,7 @@ We have a working baseline that:
 
 **Test command:**
 ```bash
-cd /data/z00626005/code/simpler
+# From project root
 PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 ```
 
@@ -115,7 +115,7 @@ examples/pto_runtime_sim_example/
 ### 3.3 Test
 
 ```bash
-cd /data/z00626005/code/simpler
+# From project root
 PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 # Expected: SUCCESS: All 16384 elements are correct (42.0)
 ```
@@ -869,7 +869,7 @@ PTO-only mode test passed:
 **PTO mode is now the default:**
 
 ```bash
-cd /data/z00626005/code/simpler
+# From project root
 PYTHONPATH=python:$PYTHONPATH python examples/pto_runtime_sim_example/main.py
 ```
 
