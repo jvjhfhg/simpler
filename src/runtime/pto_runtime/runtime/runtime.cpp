@@ -33,6 +33,7 @@ Runtime::Runtime() {
     sche_cpu_num = 1;
     tensor_pair_count = 0;
     buffer_handle_count_ = 0;
+    scope_stack_top_ = 0;
 }
 
 // =============================================================================
@@ -196,6 +197,7 @@ void Runtime::clear_tensor_pairs() {
 
 void Runtime::pto_init() {
     buffer_handle_count_ = 0;
+    scope_stack_top_ = 0;
 
     // Initialize TensorMap
     tensormap_init(&tensor_map_, tensormap_pool_, PTO_TENSORMAP_POOL_SIZE,
@@ -205,36 +207,35 @@ void Runtime::pto_init() {
            PTO_TENSORMAP_NUM_BUCKETS, PTO_TENSORMAP_POOL_SIZE);
 }
 
-PTOBufferHandle* Runtime::pto_alloc(int32_t size) {
-    if (buffer_handle_count_ >= PTO_TENSORMAP_POOL_SIZE) {
-        fprintf(stderr, "[PTO] ERROR: Buffer handle pool full (max=%d)\n", PTO_TENSORMAP_POOL_SIZE);
-        return nullptr;
+// =============================================================================
+// Scope-Based Lifecycle
+// =============================================================================
+
+void Runtime::pto_scope_begin() {
+    if (scope_stack_top_ >= PTO_MAX_SCOPE_DEPTH) {
+        fprintf(stderr, "[PTO] ERROR: Scope stack overflow (max=%d)\n", PTO_MAX_SCOPE_DEPTH);
+        return;
     }
-
-    PTOBufferHandle* handle = &buffer_handles_[buffer_handle_count_++];
-    handle->size = size;
-    handle->version = 0;
-    handle->ref_count = 1;
-
-    // Allocate device memory via host API
-    void* dev_ptr = host_api.device_malloc(size);
-    handle->addr = (uint64_t)dev_ptr;
-
-    return handle;
+    // Record current task index at scope entry
+    scope_stack_[scope_stack_top_++] = next_task_id;
+    printf("[PTO] Scope begin (depth=%d, start_task=%d)\n", scope_stack_top_, next_task_id);
 }
 
-void Runtime::pto_free(PTOBufferHandle* handle) {
-    if (handle == nullptr) return;
-
-    // Decrement reference count
-    // Actual memory reclamation deferred until all consumers finish
-    handle->ref_count--;
-
-    if (handle->ref_count <= 0) {
-        // Memory reclamation
-        host_api.device_free((void*)handle->addr);
-        handle->addr = 0;
+void Runtime::pto_scope_end() {
+    if (scope_stack_top_ <= 0) {
+        fprintf(stderr, "[PTO] ERROR: Scope stack underflow\n");
+        return;
     }
+
+    int32_t begin_pos = scope_stack_[--scope_stack_top_];
+    int32_t end_pos = next_task_id;
+
+    printf("[PTO] Scope end (depth=%d, tasks %d-%d)\n",
+           scope_stack_top_ + 1, begin_pos, end_pos - 1);
+
+    // Note: In full implementation, this would decrement fanout_refcount
+    // for all tasks in [begin_pos, end_pos) and check for CONSUMED transition.
+    // For simulation, tasks are cleaned up at the end of execution.
 }
 
 PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
@@ -251,14 +252,34 @@ PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
     new_handle->addr = handle->addr;
     new_handle->size = handle->size;
     new_handle->version = handle->version + 1;
-    new_handle->ref_count = 1;
+    // Note: no ref_count - buffer lifetime tied to task lifetime
 
     return new_handle;
 }
 
 int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
                              PTOParam* params, int32_t param_count) {
-    // Build kernel args array from params
+    // Phase 1: Allocate OUTPUT buffers implicitly
+    // Only allocate for truly new buffers (addr == 0).
+    // Versioned handles from pto_version_inc already have addr set.
+    for (int32_t i = 0; i < param_count; i++) {
+        if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
+            if (params[i].buffer->addr == 0) {
+                // New buffer: allocate and set version to 0
+                int32_t size = params[i].buffer->size;
+                void* dev_ptr = host_api.device_malloc(size);
+                params[i].buffer->addr = (uint64_t)dev_ptr;
+                params[i].buffer->version = 0;
+            }
+            // For versioned handles (from pto_version_inc), addr is already set
+            // and version should NOT be reset
+
+            // Update tensor descriptor with (possibly pre-existing) address
+            params[i].tensor.addr = params[i].buffer->addr;
+        }
+    }
+
+    // Phase 2: Build kernel args array from params
     uint64_t args[RUNTIME_MAX_ARGS];
     int num_args = 0;
 
@@ -270,22 +291,29 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
         }
     }
 
-    // Add task using legacy API
+    // Phase 3: Add task using legacy API
     int task_id = add_task(args, num_args, func_id, worker_type);
     if (task_id < 0) return -1;
 
-    // Automatic dependency detection via TensorMap
+    // Phase 4: Automatic dependency detection via TensorMap
     for (int32_t i = 0; i < param_count; i++) {
         if (params[i].type == PTOParamType::INPUT && params[i].buffer != nullptr) {
-            // Look up producer for this input tensor
+            // INPUT: Look up producer for this tensor
             int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, 0);
             if (producer >= 0 && producer != task_id) {
                 add_successor(producer, task_id);
             }
+        } else if (params[i].type == PTOParamType::INOUT && params[i].buffer != nullptr) {
+            // INOUT: Look up producer (like INPUT) but do NOT register as new producer
+            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, 0);
+            if (producer >= 0 && producer != task_id) {
+                add_successor(producer, task_id);
+            }
+            // Note: INOUT does NOT call tensormap_insert - it's not a new producer
         }
     }
 
-    // Register output tensors in TensorMap
+    // Phase 5: Register OUTPUT tensors in TensorMap
     for (int32_t i = 0; i < param_count; i++) {
         if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
             tensormap_insert(&tensor_map_, &params[i].tensor,

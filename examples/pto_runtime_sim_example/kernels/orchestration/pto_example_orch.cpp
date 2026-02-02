@@ -1,5 +1,5 @@
 /**
- * PTO Comprehensive Test Suite (Phase 7+)
+ * PTO Comprehensive Test Suite (Corrected: Scope-Based Lifecycle)
  *
  * This file combines three test scenarios into a comprehensive validation:
  *
@@ -13,14 +13,18 @@
  *
  * 3. Multi-Consumer (fan-out pattern):
  *    h = (a + 1) + (a + 2) + (a + 3) = 3a + 6
- *    Tests: Multiple consumers of single buffer, reference counting, complex DAG
+ *    Tests: Multiple consumers of single buffer, scope-based lifecycle, complex DAG
  *
  * With a=2.0, b=3.0, expected results:
  *   f = 42.0   (diamond pattern)
  *   g = 6.0    (in-place chain: 2+4=6)
  *   h = 12.0   (multi-consumer: 3*2+6=12)
  *
- * All results are written to the output buffer 'f' sequentially for validation.
+ * Design principles applied:
+ * - Memory allocation is implicit during pto_submit_task() for OUTPUT params
+ * - Scope-based buffer lifetime (pto_scope_begin/pto_scope_end)
+ * - No explicit pto_alloc/pto_free
+ * - Buffer lifetime = producer task lifetime (no separate buffer ref count)
  */
 
 #include "runtime.h"
@@ -47,7 +51,7 @@ static PTOParam make_scalar_param(uint64_t value) {
     return p;
 }
 
-// Helper: create an input PTOParam
+// Helper: create an input PTOParam from an existing buffer handle
 static PTOParam make_input_param(PTOBufferHandle* buf, int32_t size) {
     PTOParam p = {};
     p.type = PTOParamType::INPUT;
@@ -57,11 +61,11 @@ static PTOParam make_input_param(PTOBufferHandle* buf, int32_t size) {
     return p;
 }
 
-// Helper: create an output PTOParam
+// Helper: create an output PTOParam (addr will be filled by pto_submit_task)
 static PTOParam make_output_param(PTOBufferHandle* buf, int32_t size) {
     PTOParam p = {};
     p.type = PTOParamType::OUTPUT;
-    p.tensor = make_tensor_bbox(buf->addr, size);
+    p.tensor = make_tensor_bbox(0, size);  // addr=0, filled during submit
     p.buffer = buf;
     p.scalar_value = 0;
     return p;
@@ -73,6 +77,24 @@ static uint64_t float_to_u64(float f) {
     conv.u64 = 0;  // Clear upper bits
     conv.f32 = f;
     return conv.u64;
+}
+
+// Helper: create a PTOBufferHandle for external (pre-allocated) buffer
+static PTOBufferHandle make_external_handle(void* addr, int32_t size) {
+    PTOBufferHandle h = {};
+    h.addr = (uint64_t)addr;
+    h.size = size;
+    h.version = 0;
+    return h;
+}
+
+// Helper: create a PTOBufferHandle for output (addr filled during submit)
+static PTOBufferHandle make_output_handle(int32_t size) {
+    PTOBufferHandle h = {};
+    h.addr = 0;  // Will be allocated by runtime during pto_submit_task
+    h.size = size;
+    h.version = 0;
+    return h;
 }
 
 extern "C" {
@@ -106,23 +128,30 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     // Initialize PTO mode
     runtime->pto_init();
 
-    // Allocate device buffers via PTO API
-    std::cout << "\n=== Allocating Device Memory (PTO API) ===" << '\n';
     int32_t BYTES = SIZE * sizeof(float);
 
-    // Input buffers
-    PTOBufferHandle* dev_a = runtime->pto_alloc(size_a);
-    runtime->host_api.copy_to_device((void*)dev_a->addr, host_a, size_a);
+    // Allocate external input buffers via host API (pre-allocated by host)
+    std::cout << "\n=== Allocating External Input Buffers ===" << '\n';
+
+    void* dev_a_ptr = runtime->host_api.device_malloc(size_a);
+    runtime->host_api.copy_to_device(dev_a_ptr, host_a, size_a);
+    PTOBufferHandle dev_a = make_external_handle(dev_a_ptr, size_a);
     std::cout << "Tensor a: " << size_a << " bytes copied to device\n";
 
-    PTOBufferHandle* dev_b = runtime->pto_alloc(size_b);
-    runtime->host_api.copy_to_device((void*)dev_b->addr, host_b, size_b);
+    void* dev_b_ptr = runtime->host_api.device_malloc(size_b);
+    runtime->host_api.copy_to_device(dev_b_ptr, host_b, size_b);
+    PTOBufferHandle dev_b = make_external_handle(dev_b_ptr, size_b);
     std::cout << "Tensor b: " << size_b << " bytes copied to device\n";
 
-    // Output buffer
-    PTOBufferHandle* dev_f = runtime->pto_alloc(size_f);
-    runtime->record_tensor_pair(host_f, (void*)dev_f->addr, size_f);
+    // Output buffer (also external, for copy-back to host)
+    void* dev_f_ptr = runtime->host_api.device_malloc(size_f);
+    runtime->record_tensor_pair(host_f, dev_f_ptr, size_f);
+    PTOBufferHandle dev_f = make_external_handle(dev_f_ptr, size_f);
     std::cout << "Tensor f (output): " << size_f << " bytes allocated\n";
+
+    // Begin scope - all intermediate buffers allocated within scope
+    // are freed when scope_end is called
+    runtime->pto_scope_begin();
 
     // =========================================================================
     // TEST 1: Diamond Pattern - f = (a + b + 1) * (a + b + 2)
@@ -131,15 +160,16 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     std::cout << "\n--- Test 1: Diamond Pattern ---\n";
     std::cout << "Formula: f = (a + b + 1) * (a + b + 2)\n";
 
-    PTOBufferHandle* dev_c = runtime->pto_alloc(BYTES);  // c = a + b
-    PTOBufferHandle* dev_d = runtime->pto_alloc(BYTES);  // d = c + 1
-    PTOBufferHandle* dev_e = runtime->pto_alloc(BYTES);  // e = c + 2
+    // Intermediate output handles (addr allocated implicitly by pto_submit_task)
+    PTOBufferHandle dev_c = make_output_handle(BYTES);  // c = a + b
+    PTOBufferHandle dev_d = make_output_handle(BYTES);  // d = c + 1
+    PTOBufferHandle dev_e = make_output_handle(BYTES);  // e = c + 2
 
     // Task 0: c = a + b
     PTOParam params0[] = {
-        make_input_param(dev_a, BYTES),
-        make_input_param(dev_b, BYTES),
-        make_output_param(dev_c, BYTES),
+        make_input_param(&dev_a, BYTES),
+        make_input_param(&dev_b, BYTES),
+        make_output_param(&dev_c, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t0 = runtime->pto_submit_task(0, PTOWorkerType::VECTOR, params0, 4);  // kernel_add
@@ -147,9 +177,9 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 1: d = c + 1
     PTOParam params1[] = {
-        make_input_param(dev_c, BYTES),
+        make_input_param(&dev_c, BYTES),
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(dev_d, BYTES),
+        make_output_param(&dev_d, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t1 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params1, 4);  // kernel_add_scalar
@@ -157,9 +187,9 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 2: e = c + 2
     PTOParam params2[] = {
-        make_input_param(dev_c, BYTES),
+        make_input_param(&dev_c, BYTES),
         make_scalar_param(float_to_u64(2.0f)),
-        make_output_param(dev_e, BYTES),
+        make_output_param(&dev_e, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t2 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params2, 4);  // kernel_add_scalar
@@ -167,9 +197,9 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 3: f = d * e (final result for test 1)
     PTOParam params3[] = {
-        make_input_param(dev_d, BYTES),
-        make_input_param(dev_e, BYTES),
-        make_output_param(dev_f, BYTES),
+        make_input_param(&dev_d, BYTES),
+        make_input_param(&dev_e, BYTES),
+        make_output_param(&dev_f, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t3 = runtime->pto_submit_task(2, PTOWorkerType::VECTOR, params3, 4);  // kernel_mul
@@ -183,30 +213,29 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     std::cout << "\n--- Test 2: In-Place Updates (SSA Versioning) ---\n";
     std::cout << "Formula: g = (((a + 1) + 1) + 1) + 1 = a + 4\n";
 
-    // Allocate in-place working buffer (will be versioned)
-    PTOBufferHandle* dev_x_v0 = runtime->pto_alloc(BYTES);
-    std::cout << "Allocated x (in-place buffer, version 0)\n";
+    // In-place working buffer (version 0, addr allocated during submit)
+    PTOBufferHandle dev_x_v0 = make_output_handle(BYTES);
 
-    // Allocate output for test 2
-    PTOBufferHandle* dev_g = runtime->pto_alloc(BYTES);
+    // Output for test 2 (addr allocated during submit)
+    PTOBufferHandle dev_g = make_output_handle(BYTES);
 
     // Task 4: x_v0 = a + 1 (first operation)
     PTOParam params4[] = {
-        make_input_param(dev_a, BYTES),
+        make_input_param(&dev_a, BYTES),
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(dev_x_v0, BYTES),
+        make_output_param(&dev_x_v0, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t4 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params4, 4);  // kernel_add_scalar
     std::cout << "Task " << t4 << ": x_v0 = a + 1\n";
 
     // Create version 1 of x for in-place update
-    PTOBufferHandle* dev_x_v1 = runtime->pto_version_inc(dev_x_v0);
+    PTOBufferHandle* dev_x_v1 = runtime->pto_version_inc(&dev_x_v0);
     std::cout << "Created x_v1 via pto_version_inc() (version=" << dev_x_v1->version << ")\n";
 
     // Task 5: x_v1 = x_v0 + 1 (in-place update)
     PTOParam params5[] = {
-        make_input_param(dev_x_v0, BYTES),
+        make_input_param(&dev_x_v0, BYTES),
         make_scalar_param(float_to_u64(1.0f)),
         make_output_param(dev_x_v1, BYTES),
         make_scalar_param((uint64_t)SIZE),
@@ -232,7 +261,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     PTOParam params7[] = {
         make_input_param(dev_x_v2, BYTES),
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(dev_g, BYTES),
+        make_output_param(&dev_g, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t7 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params7, 4);
@@ -240,7 +269,7 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // =========================================================================
     // TEST 3: Multi-Consumer - h = (a+1) + (a+2) + (a+3) = 3a + 6
-    // Buffer 'a' has 3 consumers (tests reference counting)
+    // Buffer 'a' has 3 consumers (tests scope-based lifecycle)
     // Expected: 3*2 + 6 = 12
     //
     //        a (3 consumers)
@@ -254,17 +283,18 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     std::cout << "\n--- Test 3: Multi-Consumer (Fan-out Pattern) ---\n";
     std::cout << "Formula: h = (a+1) + (a+2) + (a+3) = 3a + 6\n";
 
-    PTOBufferHandle* dev_p = runtime->pto_alloc(BYTES);  // p = a + 1
-    PTOBufferHandle* dev_q = runtime->pto_alloc(BYTES);  // q = a + 2
-    PTOBufferHandle* dev_r = runtime->pto_alloc(BYTES);  // r = a + 3
-    PTOBufferHandle* dev_s = runtime->pto_alloc(BYTES);  // s = p + q
-    PTOBufferHandle* dev_h = runtime->pto_alloc(BYTES);  // h = s + r
+    // Intermediate output handles (addr allocated implicitly)
+    PTOBufferHandle dev_p = make_output_handle(BYTES);  // p = a + 1
+    PTOBufferHandle dev_q = make_output_handle(BYTES);  // q = a + 2
+    PTOBufferHandle dev_r = make_output_handle(BYTES);  // r = a + 3
+    PTOBufferHandle dev_s = make_output_handle(BYTES);  // s = p + q
+    PTOBufferHandle dev_h = make_output_handle(BYTES);  // h = s + r
 
     // Task 8: p = a + 1 (consumer 1 of 'a')
     PTOParam params8[] = {
-        make_input_param(dev_a, BYTES),
+        make_input_param(&dev_a, BYTES),
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(dev_p, BYTES),
+        make_output_param(&dev_p, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t8 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params8, 4);
@@ -272,9 +302,9 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 9: q = a + 2 (consumer 2 of 'a')
     PTOParam params9[] = {
-        make_input_param(dev_a, BYTES),
+        make_input_param(&dev_a, BYTES),
         make_scalar_param(float_to_u64(2.0f)),
-        make_output_param(dev_q, BYTES),
+        make_output_param(&dev_q, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t9 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params9, 4);
@@ -282,9 +312,9 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 10: r = a + 3 (consumer 3 of 'a')
     PTOParam params10[] = {
-        make_input_param(dev_a, BYTES),
+        make_input_param(&dev_a, BYTES),
         make_scalar_param(float_to_u64(3.0f)),
-        make_output_param(dev_r, BYTES),
+        make_output_param(&dev_r, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t10 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params10, 4);
@@ -292,9 +322,9 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 11: s = p + q (waits for t8 and t9)
     PTOParam params11[] = {
-        make_input_param(dev_p, BYTES),
-        make_input_param(dev_q, BYTES),
-        make_output_param(dev_s, BYTES),
+        make_input_param(&dev_p, BYTES),
+        make_input_param(&dev_q, BYTES),
+        make_output_param(&dev_s, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t11 = runtime->pto_submit_task(0, PTOWorkerType::VECTOR, params11, 4);  // kernel_add
@@ -302,25 +332,22 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 12: h = s + r (waits for t10 and t11)
     PTOParam params12[] = {
-        make_input_param(dev_s, BYTES),
-        make_input_param(dev_r, BYTES),
-        make_output_param(dev_h, BYTES),
+        make_input_param(&dev_s, BYTES),
+        make_input_param(&dev_r, BYTES),
+        make_output_param(&dev_h, BYTES),
         make_scalar_param((uint64_t)SIZE),
     };
     int t12 = runtime->pto_submit_task(0, PTOWorkerType::VECTOR, params12, 4);  // kernel_add
     std::cout << "Task " << t12 << ": h = s + r (expected: 12.0)\n";
 
+    // End scope - intermediate buffers can be freed when their consumers complete
+    runtime->pto_scope_end();
+
     // =========================================================================
-    // FINAL: Combine all test results into output buffer
-    // We verify g and h equal expected values by computing:
-    //   final_check = f + (g - 6) + (h - 12)
-    // If all tests pass, final_check should equal f (42.0)
+    // FINAL: Summary
     // =========================================================================
     std::cout << "\n--- Final Validation ---\n";
     std::cout << "Computing: f + (g - 6) + (h - 12) should equal 42.0 if all tests pass\n";
-
-    // We'll do a simpler approach: just compute f, and let the caller validate g and h
-    // by additional copy-back. For now, the main output is 'f' from test 1.
 
     std::cout << "\n=== Task Graph Summary ===" << '\n';
     std::cout << "Total tasks: " << runtime->get_task_count() << '\n';

@@ -32,6 +32,10 @@
 #define PTO_TENSORMAP_NUM_BUCKETS 1024
 #endif
 
+#ifndef PTO_MAX_SCOPE_DEPTH
+#define PTO_MAX_SCOPE_DEPTH 32
+#endif
+
 // =============================================================================
 // Worker Types
 // =============================================================================
@@ -104,13 +108,14 @@ struct PTOTensorDescriptor {
 // =============================================================================
 
 /**
- * Buffer Handle returned by pto_alloc()
+ * Buffer Handle for version tracking
  *
  * Supports versioning for in-place updates (SSA-style):
  * - Write to version v waits for all reads from version v-1
  * - Read from version v waits for writes to version v to complete
  *
- * Reference counting is at buffer level, independent of task fanout.
+ * Buffer lifetime is tied to producer task lifetime (no separate ref count).
+ * Allocation is implicit during pto_submit_task() for OUTPUT params.
  *
  * See: divergence-to-original-orchestration.md §5, §6
  */
@@ -118,7 +123,7 @@ struct PTOBufferHandle {
     uint64_t addr;           // Device memory address
     int32_t size;            // Buffer size in bytes
     int32_t version;         // Version number (for in-place updates)
-    int32_t ref_count;       // Buffer-level reference count (independent of task fanout)
+    // Note: ref_count removed - buffer lifetime = task lifetime
 };
 
 // =============================================================================
@@ -126,12 +131,13 @@ struct PTOBufferHandle {
 // =============================================================================
 
 /**
- * Parameter Type - Distinguishes inputs from outputs
+ * Parameter Type - Distinguishes inputs, outputs, and in-place updates
  */
 enum class PTOParamType : int32_t {
     INPUT  = 0,  // Read-only input buffer
-    OUTPUT = 1,  // Write-only output buffer
-    SCALAR = 2   // Raw scalar value (no buffer, no dependency tracking)
+    OUTPUT = 1,  // Write-only output buffer (allocated implicitly by runtime)
+    SCALAR = 2,  // Raw scalar value (no buffer, no dependency tracking)
+    INOUT  = 3   // In-place update (creates dependency but NOT a new producer)
 };
 
 /**

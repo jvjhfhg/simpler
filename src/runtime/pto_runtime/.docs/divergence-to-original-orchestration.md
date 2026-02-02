@@ -1,78 +1,71 @@
 # Divergence to The Original Orchestration Implementation
 
-1. **Add explicit `pto_alloc()` API** (TOTALLY WRONG)
-    - Orchestration function needs buffer address BEFORE submitting tasks
-    - Cannot use implicit allocation (inside submit) because address must be passed to dependent tasks
+This document records the original incorrect divergence points and their corrections.
+All corrections have been applied via Plan #02 (pto_runtime_correction_plan.md).
 
-2. **Add explicit `pto_free()` API** (TOTALLY WRONG)
-    - Does NOT immediately free memory
-    - Signals "no more references will be added to this buffer"
-    - Device recycles memory at its discretion after all usage finishes
+## Original Divergence Points (with corrections applied)
 
-3. **Deprecate scope-based lifecycle** (TOTALLY WRONG)
-    - Scope (`pto_scope_begin` / `pto_scope_end`) is no longer needed
-    - Buffer lifetime is fully managed by explicit `pto_alloc()` / `pto_free()` paired with buffer-level reference counting (see §5)
+1. **~~Add explicit `pto_alloc()` API~~** — REMOVED
+    - ~~Orchestration function needs buffer address BEFORE submitting tasks~~
+    - **Correction:** Memory allocation is implicit during `pto_submit_task()` for OUTPUT params. The runtime allocates and fills the buffer address during submission.
 
-4. **Two sources of buffer addresses for INCORE calls**
-    - Runtime-allocated: via `pto_alloc()` (TOTALLY WRONG)
-    - External: from orchestration function's parameter list (passed in by caller)
+2. **~~Add explicit `pto_free()` API~~** — REMOVED
+    - ~~Signals "no more references will be added to this buffer"~~
+    - **Correction:** No explicit free needed. Buffer lifetime is tied to producer task lifetime. Scope-based lifecycle handles reclamation.
 
-5. **Buffer lifecycle needs its own consumer tracking** (TOTALLY WRONG)
-    - Cannot rely on producer's fanout counter: a buffer may have multiple producers
-    - Explicitly allocated buffers require buffer-level reference counting, independent of task-level fanout
+3. **~~Deprecate scope-based lifecycle~~** — RESTORED
+    - ~~Scope is no longer needed~~
+    - **Correction:** Scope (`pto_scope_begin`/`pto_scope_end`) is the primary lifecycle mechanism. Fanout initialized to `scope_depth` provides automatic memory reclamation.
 
-6. **Version control for in-place updates**
+4. **Two sources of buffer addresses for INCORE calls** — SIMPLIFIED
+    - ~~Runtime-allocated: via `pto_alloc()`~~
+    - **Correction:** Only external (params from caller) and implicit (OUTPUT allocated during submit). No separate `pto_alloc()` call.
+
+5. **~~Buffer lifecycle needs its own consumer tracking~~** — REMOVED
+    - ~~Explicitly allocated buffers require buffer-level reference counting~~
+    - **Correction:** Buffer lifetime = task lifetime. When all consumers finish and all scopes exit, the producer task becomes CONSUMED and its packed output buffer is freed. No separate buffer ref count.
+
+6. **Version control for in-place updates** — KEPT
     - Support in-place tensor updates at the same address with different versions
     - API: `pto_version_inc(tensor)` returns new versioned handle (SSA-style)
     - Write to version `v` waits for all reads from version `v-1` to complete
     - Read from version `v` waits for writes to version `v` to complete (region-dependent)
+    - **Clarification:** INOUT params create a dependency (like INPUT) but do NOT register as a new producer in TensorMap.
 
-7. **Strided tensor descriptors for TensorMap**
-    - Simple `(base_ptr, offset, size)` cannot express non-contiguous tiles
+7. **Strided tensor descriptors for TensorMap** — KEPT
     - Need strided access pattern: `(addr, start_offset, strides[], repeats[], n_dims)`
     - Enables arbitrary regular memory layouts (tiled, transposed, sliced)
 
     ```c++
-    /**
-     * Example: addr=base, start_offset=7, strides=[10, 1], repeats=[3, 6]
-     * Access pattern: [addr+7..addr+12], [addr+17..addr+22], [addr+27..addr+32]
-     */
     struct TensorDescriptor {
-        uint64_t addr;                              // Base address in GM
-        uint64_t start_offset;                      // Starting offset from addr
-        uint64_t strides[RUNTIME_MAX_TENSOR_DIMS];  // Stride per dimension
-        uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS];  // Elements per dimension
-        int n_dims;                                 // Number of dimensions
+        uint64_t addr;
+        uint64_t start_offset;
+        uint64_t strides[RUNTIME_MAX_TENSOR_DIMS];
+        uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS];
+        int n_dims;
     };
     ```
 
-8. **TensorMap overlap judgment**
-    - Achieving both high efficiency and high accuracy simultaneously is not feasible. We provide several strategies ranging from fastest/low-accuracy (allows false positives but not false negatives) to slowest/high-accuracy. Each strategy is assigned per tensor, with higher accuracy requiring more information. When comparing two tensors, we perform the most accurate overlap judgment possible based on their shared information.
+8. **TensorMap overlap judgment** — KEPT
+    - Multiple strategies from fastest/low-accuracy (BoundingBox) to slowest/high-accuracy (StridedExact)
+    - Each strategy is assigned per tensor; overlap check uses the common level
 
-    ```
-    Example: Two tensors A and B with different strategy levels
+## Correction Summary
 
-    Tensor A: strategy = BoundingBox   (knows addr, total_size)
-    Tensor B: strategy = StridedExact  (knows addr, strides, repeats, n_dims)
+| Original Divergence | Status | Correction |
+|---------------------|--------|------------|
+| §1 Explicit `pto_alloc()` | REMOVED | Allocation is implicit during `pto_submit_task()` |
+| §2 Explicit `pto_free()` | REMOVED | No explicit free; scope + task lifetime manages buffers |
+| §3 Deprecate scope | RESTORED | Scope is the primary lifecycle mechanism |
+| §4 Two buffer sources | SIMPLIFIED | Only external (params) and implicit (OUTPUT) |
+| §5 Buffer-level ref counting | REMOVED | Buffer lifetime = task lifetime (task fanout + scope) |
+| §6 Version control | KEPT | Added INOUT param type (dependency, not producer) |
+| §7 Strided descriptors | KEPT | No changes |
+| §8 Overlap judgment | KEPT | No changes |
 
-    Overlap check picks the common level → BoundingBox (fast, may false-positive):
-      A: [addr=0x1000, size=256]  → range [0x1000, 0x1100)
-      B: [addr=0x1080, size=128]  → range [0x1080, 0x1100)
-      Result: overlapping ✓ (conservative — may be a false positive if the
-              actual strided elements of B don't touch A's region)
+## Core Design Principle
 
-    If both had StridedExact, we could compare element-by-element
-    and potentially determine they do NOT overlap — but at higher cost.
-    ```
-
-# Correct the doc
-
-Some parts of this doc is incorrect:
-
-- No explicit `alloc` interface, the consideration is that memory allocation SHOULDN'T be sequential. It should be dynamically controlled, be scheduled with the tasks together.
-- Since no `alloc`, no `free` would be reasonable.
-- Function using the buffer via INOUT paramater shouldn't be considered as a PRODUCER. It does WRITE to the existing buffer, but no PRODUCING.
-- Use `scope` to control the lifetime of produced buffers.
-- Task OUTPUT buffers should be allocated ONCE, meaning if a task produces buffer A and buffer B, there should be only one allocation , then buffer A and buffer B will be located next to each other via a simple offset. (You can say a suballocation if you like it)
-- Task output buffer size can limit it's execution/scheduling.
+Buffer lifetime is tied to its producer task's lifetime. When a task becomes CONSUMED
+(all consumers done + all scopes exited), its packed output buffer is implicitly freed.
+No separate buffer-level reference counting is needed.
 
