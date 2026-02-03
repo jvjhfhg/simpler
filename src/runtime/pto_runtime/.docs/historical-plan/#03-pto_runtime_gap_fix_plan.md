@@ -38,7 +38,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | Phase 2: Scope End Logic | ✅ Completed | 2026-02-02 |
 | Phase 3: TaskRing and HeapRing Integration | ✅ Completed | 2026-02-02 |
 | Phase 4: PTOSharedHeader and TensorMap Staleness | ✅ Completed | 2026-02-02 |
-| Phase 5: Back-Pressure Flow Control | ⏳ Pending | - |
+| Phase 5: Back-Pressure Flow Control | ✅ Completed | 2026-02-03 |
 | Phase 6: DepListPool Integration | ⏳ Pending | - |
 | Phase 7: Extended Worker Types | ⏳ Pending | - |
 
@@ -312,7 +312,13 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 5: Back-Pressure Flow Control
+## Phase 5: Back-Pressure Flow Control ✅ COMPLETED
+
+**Status:** ✅ Implemented and tested (2026-02-03)
+- All pto_runtime_example tests passed (13 tasks, all CONSUMED)
+- task_ring_alloc() now uses shared_header_.last_task_alive for back-pressure
+- heap_ring_alloc() now uses shared_header_.heap_tail for back-pressure
+- Scheduler advances heap_tail based on packed buffer end of oldest CONSUMED task
 
 **Gaps addressed:** Gap 10 (Back-Pressure Flow Control)
 
@@ -477,7 +483,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | 2 | #4 scope_end() | Medium | Phase 1 | `runtime.cpp` | ✅ Done |
 | 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ✅ Done |
 | 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
-| 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
+| 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
 | 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` | ⏳ |
 
