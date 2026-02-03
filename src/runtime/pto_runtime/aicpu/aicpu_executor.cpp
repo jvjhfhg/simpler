@@ -1,5 +1,5 @@
 /**
- * PTO AICPU Executor - PTO-Only Mode (Phase 8)
+ * PTO AICPU Executor
  *
  * Uses PtoScheduler with per-worker-type FIFO ready queues.
  * Legacy scheduler has been removed - PTO is the only mode.
@@ -24,7 +24,7 @@ constexpr int MAX_AIV_PER_THREAD = 48;
 constexpr int MAX_CORES_PER_THREAD = MAX_AIC_PER_THREAD + MAX_AIV_PER_THREAD;
 
 // =============================================================================
-// PTO Scheduler - FIFO Ready Queues (Phase 8: Only Scheduler)
+// PTO Scheduler - FIFO Ready Queues
 // =============================================================================
 
 /**
@@ -278,7 +278,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
 
         made_progress = false;
 
-        // === Phase 1: Process completed tasks ===
+        // === Process completed tasks ===
         for (int i = 0; i < core_num; i++) {
             int core_id = cur_thread_cores[i];
             Handshake* h = &hank[core_id];
@@ -288,7 +288,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                 Task* task = reinterpret_cast<Task*>(h->task);
                 h->task = 0;  // Clear task pointer
 
-                // Phase 1 (Gap #3): Transition to COMPLETED
+                // Transition to COMPLETED
                 task->state = TaskState::COMPLETED;
 
                 DEV_INFO("PTO Thread %d: Core %d completed task %d", thread_idx, core_id, task->task_id);
@@ -302,7 +302,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
 
                     // If this was the last dependency, task becomes ready
                     if (prev_fanin == 1) {
-                        // Phase 1 (Gap #3): Transition dependent to READY
+                        // Transition dependent to READY
                         dep->state = TaskState::READY;
                         int worker_type = dep->core_type;
                         enqueue_ready_task(dep_id, worker_type);
@@ -310,7 +310,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                     }
                 }
 
-                // Phase 1 (Gap #5): Increment fanout_refcount for each producer
+                // Increment fanout_refcount for each producer
                 for (int j = 0; j < task->fanin_producer_count; j++) {
                     int producer_id = task->fanin_producers[j];
                     Task* producer = runtime.get_task(producer_id);
@@ -320,7 +320,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                     }
                 }
 
-                // Phase 4 (Gap #7, #8): Advance last_task_alive and heap_tail
+                // Advance last_task_alive and heap_tail
                 // Scan forward from current last_task_alive while tasks are CONSUMED
                 if (shared_header != nullptr) {
                     int32_t last_alive = shared_header->last_task_alive;
@@ -354,7 +354,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
             }
         }
 
-        // === Phase 2: Dispatch ready tasks to idle cores ===
+        // === Dispatch ready tasks to idle cores ===
         if (cur_thread_tasks_in_flight < core_num) {
             for (int i = 0; i < core_num; i++) {
                 int core_id = cur_thread_cores[i];
@@ -372,7 +372,7 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                         if (task_id >= 0) {
                             Task* task = runtime.get_task(task_id);
 
-                            // Phase 1 (Gap #3): Transition to RUNNING
+                            // Transition to RUNNING
                             task->state = TaskState::RUNNING;
 
                             h->task = reinterpret_cast<uint64_t>(task);
@@ -462,7 +462,7 @@ void PtoScheduler::deinit() {
 }
 
 // =============================================================================
-// Entry Point - PTO Scheduler Only (Phase 8)
+// Entry Point - PTO Scheduler
 // =============================================================================
 
 extern "C" int aicpu_execute(Runtime* runtime) {

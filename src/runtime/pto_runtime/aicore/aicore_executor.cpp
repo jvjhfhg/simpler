@@ -1,7 +1,6 @@
 /**
  * PTO AICore Executor - AICore worker kernel
  *
- * Compatible with host_build_graph pattern for Phase 1.
  * Uses standard Runtime and Task structures.
  */
 
@@ -48,15 +47,15 @@ void aicore_execute(__gm__ Runtime* runtime, int block_idx, CoreType core_type) 
     (void)core_type;
     __gm__ Handshake* my_hank = (__gm__ Handshake*)(&runtime->workers[block_idx]);
 
-    // Phase 1: Wait for AICPU ready signal
+    // Wait for AICPU ready signal
     while (my_hank->aicpu_ready == 0) {
         dcci(my_hank, ENTIRE_DATA_CACHE, CACHELINE_OUT);
     }
 
-    // Phase 2: Signal AICore ready
+    // Signal AICore ready
     my_hank->aicore_done = block_idx + 1;
 
-    // Phase 3: Main execution loop
+    // Main execution loop
     while (true) {
         dcci(my_hank, ENTIRE_DATA_CACHE, CACHELINE_OUT);
 

@@ -1,5 +1,5 @@
 /**
- * PTO Runtime - Runtime Interface (Phase 8: PTO-Only Mode)
+ * PTO Runtime - Runtime Interface
  *
  * This provides a Runtime class compatible with the existing platform layer,
  * allowing the PTO runtime to work with the same infrastructure as host_build_graph.
@@ -73,13 +73,13 @@ typedef struct {
     uint64_t start_time;
     uint64_t end_time;
 
-    // Phase 1: Task State Machine (Gap #3) and Fanout Reference Counting (Gap #5)
+    // Task state machine and fanout reference counting
     TaskState state;                            // Explicit task state (default: PENDING)
     int fanout_refcount;                        // Completed consumers + scope_end count
-    int fanin_producers[RUNTIME_MAX_ARGS];      // Reverse dep list (replaced by DepListPool in Phase 6)
+    int fanin_producers[RUNTIME_MAX_ARGS];      // Reverse dependency list
     int fanin_producer_count;                   // Count of producers
 
-    // Phase 3: Packed output buffer tracking (Gap #11)
+    // Packed output buffer tracking
     int32_t packed_buffer_offset;               // Offset in HeapRing (for heap reclamation)
     int32_t packed_buffer_size;                 // Total size of packed outputs
 } Task;
@@ -113,7 +113,7 @@ public:
     int add_task(uint64_t *args, int num_args, int func_id, PTOWorkerType core_type = PTOWorkerType::VECTOR);
     void add_successor(int from_task, int to_task);
 
-    // Phase 1: Task lifecycle helpers
+    // Task lifecycle helpers
     void check_consumed(int task_id);
 
     Task *get_task(int task_id);
@@ -153,7 +153,7 @@ public:
 private:
     // === PTO Internal State ===
 
-    // Phase 1: Oldest non-CONSUMED task (Gap #3)
+    // Oldest non-CONSUMED task
     int32_t last_task_alive_;
 
     // TensorMap for automatic dependency tracking
@@ -176,7 +176,7 @@ private:
     PTOBufferHandle buffer_handles_[PTO_TENSORMAP_POOL_SIZE];
     int32_t buffer_handle_count_ = 0;
 
-    // Phase 3: Ring Buffers for task and heap allocation (Gap #1, #2, #11)
+    // Ring buffers for task and heap allocation
     TaskRing task_ring_;
     PTOTaskDescriptor task_descriptors_[PTO_TASK_WINDOW_SIZE];
     HeapRing heap_ring_;
@@ -184,12 +184,12 @@ private:
     bool use_ring_allocation_ = false;          // Enable ring allocation after pto_init_rings()
 
 public:
-    // Phase 3: Initialize ring buffers (separate from pto_init for gradual migration)
+    // Initialize ring buffers
     void pto_init_rings();
     PTOSharedHeader* get_shared_header() { return &shared_header_; }
 
 private:
-    // Phase 3+4: Shared header for Orchestrator ↔ Scheduler communication
+    // Shared header for Orchestrator ↔ Scheduler communication
     PTOSharedHeader shared_header_;
 };
 

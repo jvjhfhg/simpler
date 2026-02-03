@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PTO Runtime Simulation Example (Phase 8: PTO-Only Mode)
+PTO Runtime Simulation Example
 
 This demonstrates the PTO runtime running on the a2a3sim simulation platform,
 using the formula:
@@ -43,7 +43,7 @@ except ImportError as e:
 
 def main():
     device_id = 0
-    print("\n=== PTO Runtime Simulation (Phase 8: PTO-Only Mode) ===")
+    print("\n=== PTO Runtime Simulation ===")
 
     # Build PTO runtime
     print("\n=== Building PTO Runtime (Simulation) ===")

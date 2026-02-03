@@ -1,5 +1,5 @@
 /**
- * PTO Runtime - Runtime Implementation (Phase 8: PTO-Only Mode)
+ * PTO Runtime - Runtime Implementation
  *
  * PTO mode is always enabled. The constructor auto-initializes TensorMap
  * for automatic dependency tracking.
@@ -43,7 +43,7 @@ Runtime::Runtime() {
     scope_tasks_top_ = 0;
     last_task_alive_ = 0;
 
-    // Phase 3: Initialize ring buffer state
+    // Initialize ring buffer state
     heap_base_ = nullptr;
     use_ring_allocation_ = false;
     memset(&task_ring_, 0, sizeof(task_ring_));
@@ -109,7 +109,7 @@ void Runtime::add_successor(int from_task, int to_task) {
     from->fanout[from->fanout_count++] = to_task;
     to->fanin++;
 
-    // Phase 1: Record reverse dependency (producer → consumer tracking)
+    // Record reverse dependency (producer → consumer tracking)
     if (to->fanin_producer_count < RUNTIME_MAX_ARGS) {
         to->fanin_producers[to->fanin_producer_count++] = from_task;
     } else {
@@ -147,7 +147,7 @@ int Runtime::get_initial_ready_tasks(int* ready_tasks) {
 }
 
 // =============================================================================
-// Phase 1: Task Lifecycle Helpers (Gap #3, #5)
+// Task Lifecycle Helpers
 // =============================================================================
 
 void Runtime::check_consumed(int task_id) {
@@ -259,7 +259,7 @@ void Runtime::pto_init() {
 }
 
 // =============================================================================
-// Phase 3: Ring Buffer Initialization
+// Ring Buffer Initialization
 // =============================================================================
 
 void Runtime::pto_init_rings() {
@@ -354,7 +354,7 @@ PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
 
 int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
                              PTOParam* params, int32_t param_count) {
-    // Phase 3: Packed output buffer allocation using HeapRing
+    // Packed output buffer allocation using HeapRing
     // When ring allocation is enabled, allocate all outputs as a single packed buffer
     void* packed_base = nullptr;
     int32_t packed_buffer_offset = 0;
@@ -373,7 +373,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
 
         // Single allocation from HeapRing if there are new outputs
         if (total_output_size > 0) {
-            // Note: Using last_task_alive as tail for back-pressure (Phase 5 will use real tail)
+            // Note: Using last_task_alive as tail for back-pressure
             packed_base = heap_ring_alloc(&heap_ring_, total_output_size,
                                           &shared_header_.last_task_alive);
             packed_buffer_offset = heap_ring_offset(&heap_ring_, packed_base);
@@ -432,7 +432,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
     int task_id = add_task(args, num_args, func_id, worker_type);
     if (task_id < 0) return -1;
 
-    // Phase 3: Record packed buffer info on task
+    // Record packed buffer info on task
     tasks[task_id].packed_buffer_offset = packed_buffer_offset;
     tasks[task_id].packed_buffer_size = packed_buffer_size;
 
@@ -483,7 +483,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
         }
     }
 
-    // Phase 1 (Gap #3): Set READY if no dependencies
+    // Set READY if no dependencies
     if (tasks[task_id].fanin.load(std::memory_order_acquire) == 0) {
         tasks[task_id].state = TaskState::READY;
     }

@@ -1,5 +1,5 @@
 """
-Kernel and Orchestration Configuration (PTO Runtime - Phase 8)
+Kernel and Orchestration Configuration (PTO Runtime)
 
 Defines the kernels and orchestration function used by the PTO runtime example.
 PTO mode is the default and only mode.
