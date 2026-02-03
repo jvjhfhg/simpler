@@ -12,15 +12,7 @@
 #include <mutex>
 
 // Platform-specific logging
-#ifndef DEV_INFO
-#define DEV_INFO(fmt, ...) do { } while(0)
-#endif
-#ifndef DEV_ERROR
-#define DEV_ERROR(fmt, ...) do { } while(0)
-#endif
-#ifndef DEV_WARN
-#define DEV_WARN(fmt, ...) do { } while(0)
-#endif
+#include "aicpu/device_log.h"
 
 // =============================================================================
 // Common Constants
@@ -150,8 +142,15 @@ int PtoScheduler::init(Runtime* runtime) {
         return -1;
     }
 
-    cores_total_num_ = runtime->block_dim * blockdim_cores_num_;
+    // Use worker_count from platform (like host_build_graph does)
+    cores_total_num_ = runtime->worker_count;
     thread_cores_num_ = cores_total_num_ / thread_num_;
+
+    if (cores_total_num_ == 0) {
+        DEV_ERROR("worker_count is 0, no cores to schedule");
+        init_failed_.store(true, std::memory_order_release);
+        return -1;
+    }
 
     if (cores_total_num_ > MAX_CORES_PER_THREAD) {
         DEV_ERROR("Total cores %d exceeds maximum %d", cores_total_num_, MAX_CORES_PER_THREAD);
@@ -161,31 +160,20 @@ int PtoScheduler::init(Runtime* runtime) {
 
     DEV_INFO("PTO Config: threads=%d, cores=%d, cores_per_thread=%d", thread_num_, cores_total_num_, thread_cores_num_);
 
-    int num_aic = runtime->block_dim;
-    int blocks_per_thread = runtime->block_dim / thread_num_;
+    // Platform sets core_type on each Handshake, so we just need to assign cores to threads
+    int cores_per_thread = cores_total_num_ / thread_num_;
 
-    if (runtime->block_dim % thread_num_ != 0) {
-        DEV_ERROR("block_dim (%d) must be divisible by thread_num (%d)", runtime->block_dim, thread_num_);
+    if (cores_total_num_ % thread_num_ != 0) {
+        DEV_ERROR("worker_count (%d) must be divisible by thread_num (%d)", cores_total_num_, thread_num_);
         init_failed_.store(true, std::memory_order_release);
         return -1;
     }
 
-    // Assign cores to threads
+    // Assign cores to threads (simple sequential assignment)
     for (int t = 0; t < thread_num_; t++) {
-        int start_block = t * blocks_per_thread;
-        int end_block = (t + 1) * blocks_per_thread;
-        int core_idx = 0;
-
-        // AIC cores first
-        for (int b = start_block; b < end_block; b++) {
-            core_assignments_[t][core_idx++] = b;
-        }
-
-        // AIV cores (2 per block)
-        for (int b = start_block; b < end_block; b++) {
-            int aiv_base = num_aic;
-            core_assignments_[t][core_idx++] = aiv_base + b * 2;
-            core_assignments_[t][core_idx++] = aiv_base + b * 2 + 1;
+        int start_core = t * cores_per_thread;
+        for (int i = 0; i < cores_per_thread; i++) {
+            core_assignments_[t][i] = start_core + i;
         }
     }
 
@@ -375,8 +363,8 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
                 // Check if core is idle
                 if (h->task_status == 0 && h->task == 0) {
                     // Map core_type to worker_type for queue selection
-                    // core_type: 0=AIC, 1=AIV
-                    int worker_type = h->core_type;
+                    // core_type: CoreType::AIC=0, CoreType::AIV=1
+                    int worker_type = static_cast<int>(h->core_type);
 
                     // Try to dequeue from matching ready queue
                     if (has_ready_tasks(worker_type)) {

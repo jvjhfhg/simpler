@@ -15,7 +15,7 @@ static inline void dcci(void* addr, int scope, int type) { (void)addr; (void)sco
 #define ENTIRE_DATA_CACHE 0
 #define CACHELINE_OUT 0
 #else
-#include "aicore.h"
+#include "aicore/aicore.h"
 #endif
 
 /**
@@ -44,7 +44,7 @@ static void execute_task(__gm__ Task* task) {
  * AICore worker kernel - main entry point
  */
 __aicore__ __attribute__((weak))
-void aicore_execute(__gm__ Runtime* runtime, int block_idx, int core_type) {
+void aicore_execute(__gm__ Runtime* runtime, int block_idx, CoreType core_type) {
     (void)core_type;
     __gm__ Handshake* my_hank = (__gm__ Handshake*)(&runtime->workers[block_idx]);
 
