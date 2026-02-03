@@ -1,5 +1,5 @@
 """
-Golden script for pto_runtime_sim_example.
+Golden script for pto_runtime_example.
 
 This script defines the input data generation and expected output computation
 for the PTO runtime simulation example (a2a3sim platform).
