@@ -26,6 +26,7 @@
 #include <atomic>
 
 #include "pto_types.h"  // PTOWorkerType, PTOTensorDescriptor, etc.
+#include "common/core_type.h"  // CoreType enum (from platform)
 
 // =============================================================================
 // Configuration Constants
@@ -195,7 +196,7 @@ struct Handshake {
     volatile uint64_t task;         // Task pointer: 0=no task, non-zero=PTOTaskDescriptor* address
     volatile int32_t task_status;   // Task execution status: 0=idle/complete, 1=busy
     volatile int32_t control;       // Control signal: 0=execute, 1=quit
-    volatile int32_t core_type;     // Core type: 0=AIC, 1=AIV
+    volatile CoreType core_type;    // Core type: CoreType::AIC or CoreType::AIV
     char pad[64 - 28];              // Pad to cache line (64 bytes)
 } __attribute__((aligned(64)));
 

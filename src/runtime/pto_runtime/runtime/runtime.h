@@ -23,6 +23,7 @@
 
 #include "tensor_map.h"  // TensorMap, TensorMapEntry, PTOTensorDescriptor, PTOBufferHandle, PTOParam
 #include "ring_buffer.h" // TaskRing, HeapRing, PTOSharedHeader, TaskState, Handshake, etc.
+#include "common/core_type.h"  // CoreType enum (from platform)
 
 // =============================================================================
 // Configuration Macros
@@ -54,14 +55,7 @@
 
 // Note: Handshake, TensorPair, HostApi, TaskState are defined in pto_runtime.h
 // (included via ring_buffer.h) to avoid duplication.
-
-/**
- * Core type enumeration (legacy, maps to PTOWorkerType)
- */
-enum class CoreType : int {
-    AIC = 0,
-    AIV = 1
-};
+// Note: CoreType is defined in common/core_type.h (from platform)
 
 /**
  * Task entry in the runtime
