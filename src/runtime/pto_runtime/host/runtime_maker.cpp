@@ -3,8 +3,6 @@
  *
  * Provides init_runtime_impl and validate_runtime_impl functions that work with
  * pluggable orchestration functions for building task graphs.
- *
- * This is compatible with the host_build_graph pattern for Phase 1.
  */
 
 #include "runtime.h"
