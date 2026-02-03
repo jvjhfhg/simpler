@@ -14,6 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$SCRIPT_DIR/../runtime"
+PLATFORM_INCLUDE_DIR="$SCRIPT_DIR/../../../../src/platform/include"
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,8 +25,8 @@ NC='\033[0m' # No Color
 
 # Test configuration
 COMPILER="g++"
-CFLAGS="-std=c++17 -I$RUNTIME_DIR -Wall -Wextra"
-RUNTIME_SRC="$RUNTIME_DIR/runtime.cpp"
+CFLAGS="-std=c++17 -I$RUNTIME_DIR -I$PLATFORM_INCLUDE_DIR -Wall -Wextra"
+RUNTIME_SRC="$RUNTIME_DIR/runtime.cpp $RUNTIME_DIR/tensor_descriptor.cpp"
 
 # Test files (in execution order)
 declare -a TEST_FILES=(
@@ -92,7 +93,7 @@ compile_test() {
 
     echo -ne "  Compiling ${src_file}... "
 
-    if $COMPILER $CFLAGS -o "$exe_name" "$src_file" "$RUNTIME_SRC" 2>/tmp/compile_error.txt; then
+    if $COMPILER $CFLAGS -o "$exe_name" "$src_file" $RUNTIME_SRC 2>/tmp/compile_error.txt; then
         echo -e "${GREEN}OK${NC}"
         EXECUTABLES+=("$exe_name")
         return 0

@@ -56,17 +56,24 @@ Runtime::Runtime() {
 // =============================================================================
 
 int Runtime::add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType core_type) {
-    if (next_task_id >= RUNTIME_MAX_TASKS) {
-        fprintf(stderr, "[PTO Runtime] ERROR: Task table full (max=%d)\n", RUNTIME_MAX_TASKS);
-        return -1;
-    }
-
     if (num_args > RUNTIME_MAX_ARGS) {
         fprintf(stderr, "[PTO Runtime] ERROR: Too many args (%d > %d)\n", num_args, RUNTIME_MAX_ARGS);
         return -1;
     }
 
-    int task_id = next_task_id++;
+    int task_id;
+    if (use_ring_allocation_) {
+        // Back-pressure: stall if task ring is full
+        task_id = task_ring_alloc(&task_ring_, &shared_header_.last_task_alive);
+        // Map ring slot back to absolute task ID
+        task_id = next_task_id++;
+    } else {
+        if (next_task_id >= RUNTIME_MAX_TASKS) {
+            fprintf(stderr, "[PTO Runtime] ERROR: Task table full (max=%d)\n", RUNTIME_MAX_TASKS);
+            return -1;
+        }
+        task_id = next_task_id++;
+    }
     Task* task = &tasks[task_id];
 
     task->task_id = task_id;
@@ -373,9 +380,9 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
 
         // Single allocation from HeapRing if there are new outputs
         if (total_output_size > 0) {
-            // Note: Using last_task_alive as tail for back-pressure
+            // Back-pressure: stall if heap ring is full
             packed_base = heap_ring_alloc(&heap_ring_, total_output_size,
-                                          &shared_header_.last_task_alive);
+                                          &shared_header_.heap_tail);
             packed_buffer_offset = heap_ring_offset(&heap_ring_, packed_base);
             packed_buffer_size = total_output_size;
 
