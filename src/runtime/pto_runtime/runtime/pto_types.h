@@ -2,10 +2,12 @@
  * PTO Types - Data structures for PTO runtime extensions
  *
  * Standalone header defining PTO-specific types for:
- * - PTOTensorDescriptor: Strided tensor descriptor for non-contiguous tiles
  * - PTOBufferHandle: Buffer with version tracking for in-place updates
- * - PTOOverlapStrategy: Trade-off between speed and accuracy for dependency detection
  * - PTOParam: Parameter descriptor for pto_submit_task API
+ * - PTOWorkerType: Worker types for heterogeneous scheduling
+ *
+ * Tensor descriptor types (PTOTensorDescriptor, PTOOverlapStrategy) are
+ * defined in tensor_descriptor.h.
  *
  * This header is independent of pto_runtime.h to allow inclusion from runtime.h
  * without type conflicts (Handshake, TensorPair, HostApi).
@@ -15,14 +17,11 @@
 #define PTO_TYPES_H
 
 #include <stdint.h>
+#include "tensor_descriptor.h"
 
 // =============================================================================
 // Configuration
 // =============================================================================
-
-#ifndef PTO_MAX_TENSOR_DIMS
-#define PTO_MAX_TENSOR_DIMS 8
-#endif
 
 #ifndef PTO_TENSORMAP_POOL_SIZE
 #define PTO_TENSORMAP_POOL_SIZE 4096
@@ -57,51 +56,6 @@ enum class PTOWorkerType : int32_t {
 
 // Number of worker types (used for array sizing)
 constexpr int32_t PTO_NUM_WORKER_TYPES = 2;
-
-// =============================================================================
-// Overlap Judgment Strategies
-// =============================================================================
-
-/**
- * Overlap strategy for TensorMap dependency detection
- *
- * Trade-off between speed and accuracy:
- * - BoundingBox:  Fast O(d) check, may produce false-positive dependencies
- * - StridedExact: Slow element-by-element check, no false-positives
- *
- * See: divergence-to-original-orchestration.md §7
- */
-enum class PTOOverlapStrategy : int32_t {
-    BOUNDING_BOX  = 0,  // Fast: (addr, total_size) only, may false-positive
-    STRIDED_EXACT = 1,  // Slow: element-by-element comparison, no false-positive
-};
-
-// =============================================================================
-// Strided Tensor Descriptor
-// =============================================================================
-
-/**
- * Strided Tensor Descriptor for TensorMap
- *
- * Supports non-contiguous tiles with arbitrary strides and repeats per dimension.
- * Format: (addr, start_offset, strides[], repeats[], n_dims)
- *
- * Example - contiguous 1D buffer of 4096 bytes:
- *   addr=0x1000, start_offset=0, strides=[1], repeats=[4096], n_dims=1
- *
- * Example - 2D tile (32x64) with stride 128:
- *   addr=0x1000, start_offset=0, strides=[128, 1], repeats=[32, 64], n_dims=2
- *
- * See: divergence-to-original-orchestration.md §6
- */
-struct PTOTensorDescriptor {
-    uint64_t addr;                            // Base address in GM
-    uint64_t start_offset;                    // Starting offset from addr
-    uint64_t strides[PTO_MAX_TENSOR_DIMS];    // Stride per dimension
-    uint64_t repeats[PTO_MAX_TENSOR_DIMS];    // Elements per dimension
-    int32_t n_dims;                           // Number of dimensions
-    PTOOverlapStrategy strategy;              // Overlap judgment strategy
-};
 
 // =============================================================================
 // Buffer Handle
