@@ -39,7 +39,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | Phase 3: TaskRing and HeapRing Integration | ✅ Completed | 2026-02-02 |
 | Phase 4: PTOSharedHeader and TensorMap Staleness | ✅ Completed | 2026-02-02 |
 | Phase 5: Back-Pressure Flow Control | ✅ Completed | 2026-02-03 |
-| Phase 6: DepListPool Integration | ⏳ Pending | - |
+| Phase 6: DepListPool Integration | ✅ Completed | 2026-02-04 |
 | Phase 7: Extended Worker Types | ⏳ Pending | - |
 
 ---
@@ -360,7 +360,14 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 6: DepListPool Integration
+## Phase 6: DepListPool Integration ✅ COMPLETED
+
+**Status:** ✅ Implemented and tested (2026-02-04)
+- pto_runtime_example test passed (13 tasks, all CONSUMED)
+- Fixed-size fanout[] and fanin_producers[] arrays replaced with dynamic DepListPool
+- Per-task memory reduced from ~2KB (fixed arrays) to ~8 bytes (two offsets)
+- dep_list_foreach() used for traversing dependency lists
+- Spinlock protection for concurrent fanout modification
 
 **Gaps addressed:** Gap 6 (DepListPool)
 
@@ -484,7 +491,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | 3 | #1 TaskRing, #2 HeapRing, #11 Packed outputs | High | Phase 1 | `runtime.h`, `runtime.cpp` | ✅ Done |
 | 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
-| 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ⏳ |
+| 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` | ⏳ |
 
 ---

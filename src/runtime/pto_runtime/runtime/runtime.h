@@ -21,8 +21,9 @@
 #include <string.h>
 #include <atomic>
 
-#include "tensor_map.h"  // TensorMap, TensorMapEntry, PTOTensorDescriptor, PTOBufferHandle, PTOParam
-#include "ring_buffer.h" // TaskRing, HeapRing, PTOSharedHeader, TaskState, Handshake, etc.
+#include "tensor_map.h"    // TensorMap, TensorMapEntry, PTOTensorDescriptor, PTOBufferHandle, PTOParam
+#include "ring_buffer.h"   // TaskRing, HeapRing, PTOSharedHeader, TaskState, Handshake, etc.
+#include "dep_list_pool.h" // DepListPool, DepListEntry for dynamic dependency lists
 #include "common/core_type.h"  // CoreType enum (from platform)
 
 // =============================================================================
@@ -59,6 +60,9 @@
 
 /**
  * Task entry in the runtime
+ *
+ * Dependencies are tracked via DepListPool linked lists (fanin_head/fanout_head).
+ * The pool uses offset encoding where 0 = empty list.
  */
 typedef struct {
     int task_id;
@@ -68,16 +72,19 @@ typedef struct {
     uint64_t function_bin_addr;
     int core_type;
     std::atomic<int> fanin;
-    int fanout[RUNTIME_MAX_FANOUT];
-    int fanout_count;                           // Array length: number of entries in fanout[]
+    int fanout_count;                           // Number of consumers (for CONSUMED check)
     uint64_t start_time;
     uint64_t end_time;
 
     // Task state machine and fanout reference counting
     TaskState state;                            // Explicit task state (default: PENDING)
     int fanout_refcount;                        // Completed consumers + scope_end count
-    int fanin_producers[RUNTIME_MAX_ARGS];      // Reverse dependency list
-    int fanin_producer_count;                   // Count of producers
+
+    // DepListPool-based dependency tracking (offset encoding: 0 = empty)
+    int32_t fanin_head;                         // Head of producer list (DepListPool offset)
+    int32_t fanout_head;                        // Head of consumer list (DepListPool offset)
+    int32_t fanin_count;                        // Number of producers (immutable after submission)
+    volatile int32_t fanout_lock;               // Spinlock for concurrent fanout modification
 
     // Packed output buffer tracking
     int32_t packed_buffer_offset;               // Offset in HeapRing (for heap reclamation)
@@ -183,10 +190,15 @@ private:
     char* heap_base_;                           // Device memory base for HeapRing
     bool use_ring_allocation_ = false;          // Enable ring allocation after pto_init_rings()
 
+    // DepListPool for dynamic dependency lists (fanin/fanout)
+    DepListPool dep_list_pool_;
+    DepListEntry dep_list_entries_[PTO_DEP_LIST_POOL_SIZE];
+
 public:
     // Initialize ring buffers
     void pto_init_rings();
     PTOSharedHeader* get_shared_header() { return &shared_header_; }
+    DepListPool* get_dep_list_pool() { return &dep_list_pool_; }
 
 private:
     // Shared header for Orchestrator ↔ Scheduler communication

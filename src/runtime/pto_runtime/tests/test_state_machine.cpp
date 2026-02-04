@@ -19,10 +19,12 @@
  */
 
 #include "runtime.h"
+#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 // ============================================================================
 // Mock host API (simple malloc-based)
@@ -119,6 +121,33 @@ static int tests_failed = 0;
         tests_passed++; \
     } \
 } while (0)
+
+// ============================================================================
+// Helper functions for DepListPool traversal in tests
+// ============================================================================
+
+// Collect all task IDs from a dependency list into a vector
+static std::vector<int32_t> collect_dep_list(DepListPool* pool, int32_t head) {
+    std::vector<int32_t> result;
+    int32_t offset = head;
+    while (offset != 0) {
+        DepListEntry* entry = dep_list_get(pool, offset);
+        result.push_back(entry->task_id);
+        offset = entry->next_offset;
+    }
+    return result;
+}
+
+// Check if a task ID exists in a dependency list
+static bool dep_list_contains(DepListPool* pool, int32_t head, int32_t task_id) {
+    int32_t offset = head;
+    while (offset != 0) {
+        DepListEntry* entry = dep_list_get(pool, offset);
+        if (entry->task_id == task_id) return true;
+        offset = entry->next_offset;
+    }
+    return false;
+}
 
 // ============================================================================
 // Test 1: Orchestration-side state initialization
@@ -222,16 +251,17 @@ static void test_state_initialization() {
     CHECK(task2->fanout_refcount == 1, "T2 fanout_refcount = 1 (scope)");
     CHECK(task3->fanout_refcount == 1, "T3 fanout_refcount = 1 (scope)");
 
-    // Verify fanin_producers (reverse dependency tracking)
-    CHECK(task0->fanin_producer_count == 0, "T0 has 0 producers");
-    CHECK(task1->fanin_producer_count == 1, "T1 has 1 producer");
-    CHECK(task1->fanin_producers[0] == t0, "T1 producer[0] = T0");
-    CHECK(task2->fanin_producer_count == 1, "T2 has 1 producer");
-    CHECK(task2->fanin_producers[0] == t0, "T2 producer[0] = T0");
-    CHECK(task3->fanin_producer_count == 2, "T3 has 2 producers");
+    // Verify fanin_producers (reverse dependency tracking) using DepListPool
+    DepListPool* pool = runtime.get_dep_list_pool();
+    CHECK(task0->fanin_count == 0, "T0 has 0 producers");
+    CHECK(task1->fanin_count == 1, "T1 has 1 producer");
+    CHECK(dep_list_contains(pool, task1->fanin_head, t0), "T1 producer list contains T0");
+    CHECK(task2->fanin_count == 1, "T2 has 1 producer");
+    CHECK(dep_list_contains(pool, task2->fanin_head, t0), "T2 producer list contains T0");
+    CHECK(task3->fanin_count == 2, "T3 has 2 producers");
     // T3 producers are T1 and T2 (order depends on TensorMap lookup order)
-    bool has_t1 = (task3->fanin_producers[0] == t1 || task3->fanin_producers[1] == t1);
-    bool has_t2 = (task3->fanin_producers[0] == t2 || task3->fanin_producers[1] == t2);
+    bool has_t1 = dep_list_contains(pool, task3->fanin_head, t1);
+    bool has_t2 = dep_list_contains(pool, task3->fanin_head, t2);
     CHECK(has_t1 && has_t2, "T3 producers include T1 and T2");
 
     // Print final state
@@ -304,6 +334,7 @@ static void test_state_transitions() {
     Task* task1 = runtime.get_task(t1);
     Task* task2 = runtime.get_task(t2);
     Task* task3 = runtime.get_task(t3);
+    DepListPool* pool = runtime.get_dep_list_pool();
 
     // --- Simulate: Dispatch T0 (READY → RUNNING) ---
     printf("\n--- Dispatch T0 ---\n");
@@ -316,15 +347,15 @@ static void test_state_transitions() {
     task0->state = TaskState::COMPLETED;
     CHECK(task0->state == TaskState::COMPLETED, "T0 → COMPLETED");
 
-    // Decrement fanin of T1 and T2 (like aicpu_executor does)
-    for (int j = 0; j < task0->fanout_count; j++) {
-        int dep_id = task0->fanout[j];
-        Task* dep = runtime.get_task(dep_id);
-        int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
-        if (prev == 1) {
-            dep->state = TaskState::READY;
-        }
-    }
+    // Decrement fanin of T1 and T2 (like aicpu_executor does) using DepListPool
+    dep_list_foreach(pool, task0->fanout_head,
+        [&](int32_t dep_id, void*) {
+            Task* dep = runtime.get_task(dep_id);
+            int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
+            if (prev == 1) {
+                dep->state = TaskState::READY;
+            }
+        }, nullptr);
     CHECK(task1->state == TaskState::READY, "T1 → READY (T0 completed)");
     CHECK(task2->state == TaskState::READY, "T2 → READY (T0 completed)");
     CHECK(task3->state == TaskState::PENDING, "T3 still PENDING (needs T1 and T2)");
@@ -335,24 +366,24 @@ static void test_state_transitions() {
     task1->state = TaskState::COMPLETED;
     CHECK(task1->state == TaskState::COMPLETED, "T1 → COMPLETED");
 
-    // T1 completion: decrement T3's fanin
-    for (int j = 0; j < task1->fanout_count; j++) {
-        int dep_id = task1->fanout[j];
-        Task* dep = runtime.get_task(dep_id);
-        int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
-        if (prev == 1) {
-            dep->state = TaskState::READY;
-        }
-    }
+    // T1 completion: decrement T3's fanin using DepListPool
+    dep_list_foreach(pool, task1->fanout_head,
+        [&](int32_t dep_id, void*) {
+            Task* dep = runtime.get_task(dep_id);
+            int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
+            if (prev == 1) {
+                dep->state = TaskState::READY;
+            }
+        }, nullptr);
     CHECK(task3->state == TaskState::PENDING, "T3 still PENDING (needs T2)");
 
-    // T1 completion: increment fanout_refcount for T1's producers
-    for (int j = 0; j < task1->fanin_producer_count; j++) {
-        int producer_id = task1->fanin_producers[j];
-        Task* producer = runtime.get_task(producer_id);
-        producer->fanout_refcount++;
-        runtime.check_consumed(producer_id);
-    }
+    // T1 completion: increment fanout_refcount for T1's producers using DepListPool
+    dep_list_foreach(pool, task1->fanin_head,
+        [&](int32_t producer_id, void*) {
+            Task* producer = runtime.get_task(producer_id);
+            producer->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(task0->fanout_refcount == 2, "T0 fanout_refcount = 2 (T1 + scope)");
     CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (fanout_refcount=2 < fanout_count+1=3)");
 
@@ -361,24 +392,24 @@ static void test_state_transitions() {
     task2->state = TaskState::RUNNING;
     task2->state = TaskState::COMPLETED;
 
-    // T2 completion: decrement T3's fanin
-    for (int j = 0; j < task2->fanout_count; j++) {
-        int dep_id = task2->fanout[j];
-        Task* dep = runtime.get_task(dep_id);
-        int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
-        if (prev == 1) {
-            dep->state = TaskState::READY;
-        }
-    }
+    // T2 completion: decrement T3's fanin using DepListPool
+    dep_list_foreach(pool, task2->fanout_head,
+        [&](int32_t dep_id, void*) {
+            Task* dep = runtime.get_task(dep_id);
+            int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
+            if (prev == 1) {
+                dep->state = TaskState::READY;
+            }
+        }, nullptr);
     CHECK(task3->state == TaskState::READY, "T3 → READY (both T1, T2 completed)");
 
-    // T2 completion: increment fanout_refcount for T2's producers
-    for (int j = 0; j < task2->fanin_producer_count; j++) {
-        int producer_id = task2->fanin_producers[j];
-        Task* producer = runtime.get_task(producer_id);
-        producer->fanout_refcount++;
-        runtime.check_consumed(producer_id);
-    }
+    // T2 completion: increment fanout_refcount for T2's producers using DepListPool
+    dep_list_foreach(pool, task2->fanin_head,
+        [&](int32_t producer_id, void*) {
+            Task* producer = runtime.get_task(producer_id);
+            producer->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(task0->fanout_refcount == 3, "T0 fanout_refcount = 3 (T1+T2+scope)");
     CHECK(task0->state == TaskState::CONSUMED, "T0 → CONSUMED (fanout_refcount=3 == fanout_count+1=3)");
 
@@ -387,13 +418,13 @@ static void test_state_transitions() {
     task3->state = TaskState::RUNNING;
     task3->state = TaskState::COMPLETED;
 
-    // T3 completion: increment fanout_refcount for T3's producers (T1, T2)
-    for (int j = 0; j < task3->fanin_producer_count; j++) {
-        int producer_id = task3->fanin_producers[j];
-        Task* producer = runtime.get_task(producer_id);
-        producer->fanout_refcount++;
-        runtime.check_consumed(producer_id);
-    }
+    // T3 completion: increment fanout_refcount for T3's producers (T1, T2) using DepListPool
+    dep_list_foreach(pool, task3->fanin_head,
+        [&](int32_t producer_id, void*) {
+            Task* producer = runtime.get_task(producer_id);
+            producer->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(task1->fanout_refcount == 2, "T1 fanout_refcount = 2 (T3+scope)");
     CHECK(task1->state == TaskState::CONSUMED, "T1 → CONSUMED (fanout_refcount=2 == fanout_count+1=2)");
     CHECK(task2->fanout_refcount == 2, "T2 fanout_refcount = 2 (T3+scope)");
@@ -452,6 +483,7 @@ static void test_chain_topology() {
 
     Task* taskA = runtime.get_task(tA);
     Task* taskB = runtime.get_task(tB);
+    DepListPool* pool = runtime.get_dep_list_pool();
 
     CHECK(taskA->state == TaskState::READY, "A starts READY");
     CHECK(taskB->state == TaskState::PENDING, "B starts PENDING");
@@ -470,11 +502,12 @@ static void test_chain_topology() {
     taskB->state = TaskState::RUNNING;
     taskB->state = TaskState::COMPLETED;
 
-    for (int j = 0; j < taskB->fanin_producer_count; j++) {
-        Task* producer = runtime.get_task(taskB->fanin_producers[j]);
-        producer->fanout_refcount++;
-        runtime.check_consumed(taskB->fanin_producers[j]);
-    }
+    dep_list_foreach(pool, taskB->fanin_head,
+        [&](int32_t producer_id, void*) {
+            Task* producer = runtime.get_task(producer_id);
+            producer->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(taskA->state == TaskState::CONSUMED, "A → CONSUMED after B completes");
 
     // B is leaf: check_consumed directly

@@ -14,6 +14,7 @@
  */
 
 #include "runtime.h"
+#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -231,6 +232,7 @@ static void test_diamond_scope_consumed() {
     Task* task1 = runtime.get_task(t1);
     Task* task2 = runtime.get_task(t2);
     Task* task3 = runtime.get_task(t3);
+    DepListPool* pool = runtime.get_dep_list_pool();
 
     // Before scope_end: fanout_count = real consumers only, target = fanout_count + 1
     CHECK(task0->fanout_count == 2, "T0 fanout_count = 2 (T1, T2)");
@@ -242,52 +244,58 @@ static void test_diamond_scope_consumed() {
     printf("\n--- Execute T0 ---\n");
     task0->state = TaskState::RUNNING;
     task0->state = TaskState::COMPLETED;
-    for (int j = 0; j < task0->fanout_count; j++) {
-        Task* dep = runtime.get_task(task0->fanout[j]);
-        if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
-            dep->state = TaskState::READY;
-    }
+    dep_list_foreach(pool, task0->fanout_head,
+        [&](int32_t dep_id, void*) {
+            Task* dep = runtime.get_task(dep_id);
+            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
+                dep->state = TaskState::READY;
+        }, nullptr);
     CHECK(task1->state == TaskState::READY, "T1 → READY");
     CHECK(task2->state == TaskState::READY, "T2 → READY");
 
     printf("\n--- Execute T1 ---\n");
     task1->state = TaskState::RUNNING;
     task1->state = TaskState::COMPLETED;
-    for (int j = 0; j < task1->fanout_count; j++) {
-        Task* dep = runtime.get_task(task1->fanout[j]);
-        if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
-            dep->state = TaskState::READY;
-    }
-    for (int j = 0; j < task1->fanin_producer_count; j++) {
-        runtime.get_task(task1->fanin_producers[j])->fanout_refcount++;
-        runtime.check_consumed(task1->fanin_producers[j]);
-    }
+    dep_list_foreach(pool, task1->fanout_head,
+        [&](int32_t dep_id, void*) {
+            Task* dep = runtime.get_task(dep_id);
+            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
+                dep->state = TaskState::READY;
+        }, nullptr);
+    dep_list_foreach(pool, task1->fanin_head,
+        [&](int32_t producer_id, void*) {
+            runtime.get_task(producer_id)->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(task0->fanout_refcount == 1, "T0 refcount = 1 (T1 done)");
     CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (1 < fanout_count+1=3, scope holds ref)");
 
     printf("\n--- Execute T2 ---\n");
     task2->state = TaskState::RUNNING;
     task2->state = TaskState::COMPLETED;
-    for (int j = 0; j < task2->fanout_count; j++) {
-        Task* dep = runtime.get_task(task2->fanout[j]);
-        if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
-            dep->state = TaskState::READY;
-    }
+    dep_list_foreach(pool, task2->fanout_head,
+        [&](int32_t dep_id, void*) {
+            Task* dep = runtime.get_task(dep_id);
+            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
+                dep->state = TaskState::READY;
+        }, nullptr);
     CHECK(task3->state == TaskState::READY, "T3 → READY");
-    for (int j = 0; j < task2->fanin_producer_count; j++) {
-        runtime.get_task(task2->fanin_producers[j])->fanout_refcount++;
-        runtime.check_consumed(task2->fanin_producers[j]);
-    }
+    dep_list_foreach(pool, task2->fanin_head,
+        [&](int32_t producer_id, void*) {
+            runtime.get_task(producer_id)->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(task0->fanout_refcount == 2, "T0 refcount = 2 (T1+T2 done)");
     CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (2 < fanout_count+1=3, scope holds ref)");
 
     printf("\n--- Execute T3 ---\n");
     task3->state = TaskState::RUNNING;
     task3->state = TaskState::COMPLETED;
-    for (int j = 0; j < task3->fanin_producer_count; j++) {
-        runtime.get_task(task3->fanin_producers[j])->fanout_refcount++;
-        runtime.check_consumed(task3->fanin_producers[j]);
-    }
+    dep_list_foreach(pool, task3->fanin_head,
+        [&](int32_t producer_id, void*) {
+            runtime.get_task(producer_id)->fanout_refcount++;
+            runtime.check_consumed(producer_id);
+        }, nullptr);
     CHECK(task1->fanout_refcount == 1, "T1 refcount = 1 (T3 done)");
     CHECK(task1->state == TaskState::COMPLETED, "T1 still COMPLETED (1 < fanout_count+1=2, scope holds ref)");
     CHECK(task2->fanout_refcount == 1, "T2 refcount = 1 (T3 done)");
