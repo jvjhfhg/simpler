@@ -164,7 +164,7 @@ enum PTOOverlapStrategy : int32_t {
 // Strided tensor descriptor for TensorMap
 // Supports non-contiguous tiles: (addr, start_offset, strides[], repeats[], n_dims)
 // See: divergence-to-original-orchestration.md §6
-struct PTOTensorDescriptor {
+struct TensorDescriptor {
     uint64_t addr;                            // Base address in GM
     uint64_t start_offset;                    // Starting offset from addr
     uint64_t strides[PTO_MAX_TENSOR_DIMS];    // Stride per dimension
@@ -222,7 +222,7 @@ enum PTOParamType : int32_t {
 // Task parameter with tensor descriptor
 struct PTOParam {
     PTOParamType type;
-    PTOTensorDescriptor tensor;   // Full strided descriptor
+    TensorDescriptor tensor;   // Full strided descriptor
     PTOBufferHandle* buffer;      // Associated buffer (for ref counting)
 };
 
@@ -401,7 +401,7 @@ Add TensorMap for automatic dependency tracking with strided tensor support and 
 
 // TensorMap entry stores full tensor descriptor for overlap checking
 struct TensorMapEntry {
-    PTOTensorDescriptor tensor;
+    TensorDescriptor tensor;
     int32_t producer_task_id;
     int32_t version;              // For in-place update tracking
     int32_t next_in_bucket;
@@ -435,7 +435,7 @@ inline int32_t tensormap_hash(TensorMap* tm, uint64_t addr) {
 // See: divergence-to-original-orchestration.md §7
 
 // BoundingBox: Fast, may false-positive
-inline bool overlap_bounding_box(const PTOTensorDescriptor* a, const PTOTensorDescriptor* b) {
+inline bool overlap_bounding_box(const TensorDescriptor* a, const TensorDescriptor* b) {
     if (a->addr != b->addr) return false;
 
     // Compute bounding box for each tensor
@@ -457,7 +457,7 @@ inline bool overlap_bounding_box(const PTOTensorDescriptor* a, const PTOTensorDe
 }
 
 // StridedExact: Slow, no false-positive (element-by-element)
-inline bool overlap_strided_exact(const PTOTensorDescriptor* a, const PTOTensorDescriptor* b) {
+inline bool overlap_strided_exact(const TensorDescriptor* a, const TensorDescriptor* b) {
     if (a->addr != b->addr) return false;
     // TODO: Implement element-by-element comparison for exact overlap detection
     // For now, fall back to bounding box
@@ -465,7 +465,7 @@ inline bool overlap_strided_exact(const PTOTensorDescriptor* a, const PTOTensorD
 }
 
 // Pick the most accurate strategy based on common information
-inline bool tensors_overlap(const PTOTensorDescriptor* a, const PTOTensorDescriptor* b) {
+inline bool tensors_overlap(const TensorDescriptor* a, const TensorDescriptor* b) {
     PTOOverlapStrategy common = (a->strategy < b->strategy) ? a->strategy : b->strategy;
 
     switch (common) {
@@ -477,7 +477,7 @@ inline bool tensors_overlap(const PTOTensorDescriptor* a, const PTOTensorDescrip
     }
 }
 
-inline void tensormap_insert(TensorMap* tm, const PTOTensorDescriptor* tensor,
+inline void tensormap_insert(TensorMap* tm, const TensorDescriptor* tensor,
                             int32_t producer_task_id, int32_t version) {
     int32_t bucket = tensormap_hash(tm, tensor->addr);
     int32_t slot = tm->pool_head;
@@ -492,7 +492,7 @@ inline void tensormap_insert(TensorMap* tm, const PTOTensorDescriptor* tensor,
 }
 
 // Returns producer task_id or -1 if not found
-inline int32_t tensormap_lookup(TensorMap* tm, const PTOTensorDescriptor* tensor,
+inline int32_t tensormap_lookup(TensorMap* tm, const TensorDescriptor* tensor,
                                int32_t last_task_alive) {
     int32_t bucket = tensormap_hash(tm, tensor->addr);
     int32_t entry_idx = tm->buckets[bucket];
@@ -660,8 +660,8 @@ Create a new orchestration file that uses the full PTO API: `pto_alloc()`, `pto_
 #include "pto_types.h"
 
 // Helper: create a BoundingBox tensor descriptor (simplest strategy)
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
@@ -886,7 +886,7 @@ SUCCESS: All 16384 elements are correct (42.0)
 | Phase | Files Added/Modified | Behavior Change |
 |-------|---------------------|-----------------|
 | 0 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp`, `aicore_executor.cpp`, `runtime_maker.cpp` | Baseline |
-| 1 | Add `pto_types.h` (includes `PTOTensorDescriptor`, `PTOBufferHandle`, `PTOOverlapStrategy`) | None ✓ |
+| 1 | Add `pto_types.h` (includes `TensorDescriptor`, `PTOBufferHandle`, `PTOOverlapStrategy`) | None ✓ |
 | 2 | Update `ring_buffer.h`, `dep_list_pool.h` | None ✓ (already existed from Phase 0) |
 | 3 | Add `tensor_map.h` (with strided overlap strategies) | None ✓ |
 | 4 | Update `runtime.h`, `runtime.cpp`, `pto_types.h` (add `pto_alloc`, `pto_free`, `pto_version_inc`, `pto_submit_task`) | New API (unused) ✓ |

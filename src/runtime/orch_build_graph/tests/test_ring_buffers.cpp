@@ -13,14 +13,15 @@
  *   g++ -std=c++17 -I../runtime -o test_phase3 test_phase3_ring_buffers.cpp ../runtime/runtime.cpp
  */
 
-#include "runtime.h"
-#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include "dep_list_pool.h"
+#include "runtime.h"
 
 // ============================================================================
 // Mock host API
@@ -41,9 +42,7 @@ static void* mock_device_malloc(size_t size) {
     return ptr;
 }
 
-static void mock_device_free(void* ptr) {
-    free(ptr);
-}
+static void mock_device_free(void* ptr) { free(ptr); }
 
 static int mock_copy_to_device(void* dev, const void* host, size_t size) {
     memcpy(dev, host, size);
@@ -66,8 +65,8 @@ static void cleanup_allocations() {
 // Helpers
 // ============================================================================
 
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
@@ -126,15 +125,16 @@ static PTOBufferHandle make_output_handle(int32_t size) {
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define CHECK(cond, msg) do { \
-    if (!(cond)) { \
-        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
-        tests_failed++; \
-    } else { \
-        printf("  PASS: %s\n", msg); \
-        tests_passed++; \
-    } \
-} while (0)
+#define CHECK(cond, msg)                                     \
+    do {                                                     \
+        if (!(cond)) {                                       \
+            printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
+            tests_failed++;                                  \
+        } else {                                             \
+            printf("  PASS: %s\n", msg);                     \
+            tests_passed++;                                  \
+        }                                                    \
+    } while (0)
 
 // ============================================================================
 // Test 1: Ring buffer initialization
@@ -197,21 +197,19 @@ static void test_single_task_packed_output() {
 
     CHECK(task0->packed_buffer_offset == 0, "T0 packed_buffer_offset = 0 (first allocation)");
     CHECK(task0->packed_buffer_size == expected_total,
-          ("T0 packed_buffer_size = " + std::to_string(expected_total) + " (2 aligned outputs)").c_str());
+        ("T0 packed_buffer_size = " + std::to_string(expected_total) + " (2 aligned outputs)").c_str());
 
     // Check output addresses are contiguous
     uint64_t addr_b = dev_b.addr;
     uint64_t addr_c = dev_c.addr;
     CHECK(addr_b != 0, "dev_b.addr allocated");
     CHECK(addr_c != 0, "dev_c.addr allocated");
-    CHECK(addr_c == addr_b + aligned_size,
-          "Output addresses are contiguous (packed)");
+    CHECK(addr_c == addr_b + aligned_size, "Output addresses are contiguous (packed)");
 
     // Check shared header updates
     PTOSharedHeader* header = runtime.get_shared_header();
     CHECK(header->current_task_index == 1, "current_task_index advanced to 1");
-    CHECK(header->heap_top == expected_total,
-          ("heap_top advanced to " + std::to_string(expected_total)).c_str());
+    CHECK(header->heap_top == expected_total, ("heap_top advanced to " + std::to_string(expected_total)).c_str());
 
     runtime.pto_scope_end();
     runtime.print_runtime();
@@ -417,8 +415,8 @@ static void test_mixed_allocation() {
     // T0: dev_b is pre-allocated, dev_c needs allocation
     PTOParam params0[] = {
         make_input_param(&dev_a, BYTES),
-        make_output_param(&dev_b, BYTES),   // Pre-allocated (addr != 0)
-        make_output_param(&dev_c, BYTES),   // Needs allocation (addr == 0)
+        make_output_param(&dev_b, BYTES),  // Pre-allocated (addr != 0)
+        make_output_param(&dev_c, BYTES),  // Needs allocation (addr == 0)
         make_scalar_param(64),
     };
     int t0 = runtime.pto_submit_task(0, PTOWorkerType::VECTOR, params0, 4);
@@ -526,7 +524,7 @@ static void test_alignment() {
 
     Task* task0 = runtime.get_task(t0);
     CHECK(task0->packed_buffer_size == expected_total,
-          ("packed_buffer_size = " + std::to_string(expected_total) + " (aligned sum)").c_str());
+        ("packed_buffer_size = " + std::to_string(expected_total) + " (aligned sum)").c_str());
 
     // Verify spacing between addresses
     CHECK(dev_c.addr - dev_b.addr == (uint64_t)aligned_b, "dev_c follows dev_b with aligned spacing");

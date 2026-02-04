@@ -13,27 +13,24 @@
  *   g++ -std=c++17 -I../runtime -o test_dep_list_pool test_dep_list_pool.cpp ../runtime/runtime.cpp
  */
 
-#include "runtime.h"
-#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
+
+#include "dep_list_pool.h"
+#include "runtime.h"
 
 // ============================================================================
 // Mock host API
 // ============================================================================
 
-static void* mock_device_malloc(size_t size) {
-    return malloc(size);
-}
+static void* mock_device_malloc(size_t size) { return malloc(size); }
 
-static void mock_device_free(void* ptr) {
-    free(ptr);
-}
+static void mock_device_free(void* ptr) { free(ptr); }
 
 static int mock_copy_to_device(void* dev, const void* host, size_t size) {
     memcpy(dev, host, size);
@@ -49,8 +46,8 @@ static int mock_copy_from_device(void* host, const void* dev, size_t size) {
 // Helpers
 // ============================================================================
 
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
@@ -109,15 +106,16 @@ static PTOBufferHandle make_output_handle(int32_t size) {
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define CHECK(cond, msg) do { \
-    if (!(cond)) { \
-        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
-        tests_failed++; \
-    } else { \
-        printf("  PASS: %s\n", msg); \
-        tests_passed++; \
-    } \
-} while (0)
+#define CHECK(cond, msg)                                     \
+    do {                                                     \
+        if (!(cond)) {                                       \
+            printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
+            tests_failed++;                                  \
+        } else {                                             \
+            printf("  PASS: %s\n", msg);                     \
+            tests_passed++;                                  \
+        }                                                    \
+    } while (0)
 
 // ============================================================================
 // Helper: Collect all task IDs from a dependency list
@@ -125,10 +123,7 @@ static int tests_failed = 0;
 
 static std::vector<int32_t> collect_dep_list(DepListPool* pool, int32_t head) {
     std::vector<int32_t> result;
-    dep_list_foreach(pool, head,
-        [&](int32_t task_id, void*) {
-            result.push_back(task_id);
-        }, nullptr);
+    dep_list_foreach(pool, head, [&](int32_t task_id, void*) { result.push_back(task_id); }, nullptr);
     return result;
 }
 
@@ -212,13 +207,12 @@ static void test_high_fanout() {
     DepListPool* pool = runtime.get_dep_list_pool();
 
     // Verify fanout_count
-    CHECK(task0->fanout_count == NUM_CONSUMERS,
-          ("T0 fanout_count = " + std::to_string(NUM_CONSUMERS)).c_str());
+    CHECK(task0->fanout_count == NUM_CONSUMERS, ("T0 fanout_count = " + std::to_string(NUM_CONSUMERS)).c_str());
 
     // Verify all consumers are in fanout list
     std::vector<int32_t> fanout_list = collect_dep_list(pool, task0->fanout_head);
-    CHECK(fanout_list.size() == NUM_CONSUMERS,
-          ("Fanout list has " + std::to_string(NUM_CONSUMERS) + " entries").c_str());
+    CHECK(
+        fanout_list.size() == NUM_CONSUMERS, ("Fanout list has " + std::to_string(NUM_CONSUMERS) + " entries").c_str());
 
     // Convert to set for fast lookup
     std::set<int32_t> fanout_set(fanout_list.begin(), fanout_list.end());
@@ -249,8 +243,8 @@ static void test_high_fanout() {
     CHECK(all_fanin_correct, "All consumers have correct fanin (T0)");
 
     // Print DepListPool utilization
-    printf("  DepListPool utilization: %d / %d entries (%.1f%%)\n",
-           pool->top, pool->size, 100.0 * pool->top / pool->size);
+    printf(
+        "  DepListPool utilization: %d / %d entries (%.1f%%)\n", pool->top, pool->size, 100.0 * pool->top / pool->size);
     CHECK(pool->top >= NUM_CONSUMERS, "Pool allocated enough entries");
 
     runtime.pto_scope_end();
@@ -266,16 +260,16 @@ static void test_memory_efficiency() {
 
     // Old approach: Task struct with fixed arrays
     struct OldTask {
-        int fanout[512];           // 2048 bytes
-        int fanin_producers[32];   // 128 bytes
+        int fanout[512];          // 2048 bytes
+        int fanin_producers[32];  // 128 bytes
         // ... other fields ...
     };
 
     // New approach: Task struct with DepListPool
     struct NewTask {
-        int32_t fanin_head;        // 4 bytes
-        int32_t fanout_head;       // 4 bytes
-        int32_t fanin_count;       // 4 bytes
+        int32_t fanin_head;   // 4 bytes
+        int32_t fanout_head;  // 4 bytes
+        int32_t fanin_count;  // 4 bytes
         // ... other fields ...
     };
 
@@ -285,8 +279,8 @@ static void test_memory_efficiency() {
     printf("  Old fixed array approach: %zu bytes per task\n", old_dep_memory);
     printf("  New DepListPool approach: %zu bytes per task\n", new_dep_memory);
     printf("  Memory savings: %zu bytes per task (%.1f%% reduction)\n",
-           old_dep_memory - new_dep_memory,
-           100.0 * (old_dep_memory - new_dep_memory) / old_dep_memory);
+        old_dep_memory - new_dep_memory,
+        100.0 * (old_dep_memory - new_dep_memory) / old_dep_memory);
 
     CHECK(new_dep_memory < old_dep_memory / 100, "New approach uses <1% of old memory");
     CHECK(new_dep_memory <= 12, "New approach uses <=12 bytes per task");
@@ -493,17 +487,17 @@ static void test_wide_fanout_stress() {
     Task* task0 = runtime.get_task(t0);
     DepListPool* pool = runtime.get_dep_list_pool();
 
-    CHECK(task0->fanout_count == NUM_CONSUMERS,
-          ("Producer has " + std::to_string(NUM_CONSUMERS) + " consumers").c_str());
+    CHECK(
+        task0->fanout_count == NUM_CONSUMERS, ("Producer has " + std::to_string(NUM_CONSUMERS) + " consumers").c_str());
 
     // Verify all consumers present
     int fanout_list_count = dep_list_count(pool, task0->fanout_head);
     CHECK(fanout_list_count == NUM_CONSUMERS,
-          ("Fanout list has all " + std::to_string(NUM_CONSUMERS) + " consumers").c_str());
+        ("Fanout list has all " + std::to_string(NUM_CONSUMERS) + " consumers").c_str());
 
     // Print DepListPool utilization
-    printf("  DepListPool utilization: %d / %d entries (%.1f%%)\n",
-           pool->top, pool->size, 100.0 * pool->top / pool->size);
+    printf(
+        "  DepListPool utilization: %d / %d entries (%.1f%%)\n", pool->top, pool->size, 100.0 * pool->top / pool->size);
 
     double fill_ratio = (double)pool->top / pool->size;
     CHECK(fill_ratio < 0.9, "Pool not overfilled (< 90% capacity)");
