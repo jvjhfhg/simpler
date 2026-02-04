@@ -380,7 +380,7 @@ PTOBufferHandle* pto_version_inc(PTOBufferHandle* handle);
 // PTOParam for OUTPUT now uses pointer-to-pointer for address
 struct PTOParam {
     PTOParamType type;
-    PTOTensorDescriptor tensor;
+    TensorDescriptor tensor;
     // For OUTPUT: tensor.addr is void** (pointer to receive allocated address)
     // For INPUT/INOUT: tensor.addr is void* (actual buffer address)
 };

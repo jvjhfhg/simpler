@@ -21,12 +21,13 @@
 #ifndef ORCH_BUILD_GRAPH_PTO_RUNTIME_H
 #define ORCH_BUILD_GRAPH_PTO_RUNTIME_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
+
 #include <atomic>
 
-#include "pto_types.h"  // PTOWorkerType, PTOTensorDescriptor, etc.
 #include "common/core_type.h"  // CoreType enum (from platform)
+#include "pto_types.h"         // PTOWorkerType, TensorDescriptor, etc.
 
 // =============================================================================
 // Configuration Constants
@@ -89,11 +90,11 @@
  * Memory reclamation happens when task transitions to CONSUMED.
  */
 enum class TaskState : int32_t {
-    PENDING   = 0,  // Waiting for dependencies
-    READY     = 1,  // All dependencies met, in ready queue
-    RUNNING   = 2,  // Executing on worker
+    PENDING = 0,    // Waiting for dependencies
+    READY = 1,      // All dependencies met, in ready queue
+    RUNNING = 2,    // Executing on worker
     COMPLETED = 3,  // Execution done, may have live consumers
-    CONSUMED  = 4   // All consumers done, buffer can be freed
+    CONSUMED = 4    // All consumers done, buffer can be freed
 };
 
 // =============================================================================
@@ -121,9 +122,9 @@ struct alignas(64) PTOSharedHeader {
     char pad1[64 - 12];
 
     // === Scheduler → Orchestrator ===
-    volatile int32_t last_task_alive;     // Oldest non-CONSUMED task
-    volatile int32_t heap_tail;           // Oldest live buffer start
-    volatile int32_t scheduler_done;      // 1 when all tasks complete
+    volatile int32_t last_task_alive;  // Oldest non-CONSUMED task
+    volatile int32_t heap_tail;        // Oldest live buffer start
+    volatile int32_t scheduler_done;   // 1 when all tasks complete
     char pad2[64 - 12];
 };
 
@@ -145,28 +146,28 @@ struct alignas(64) PTOSharedHeader {
  */
 struct PTOTaskDescriptor {
     // === Task Identity ===
-    int32_t task_id;                      // Unique task identifier (may wrap in ring)
-    int32_t func_id;                      // Kernel function ID
-    PTOWorkerType worker_type;            // PTOWorkerType::CUBE or PTOWorkerType::VECTOR
-    int32_t num_args;                     // Number of valid arguments
+    int32_t task_id;            // Unique task identifier (may wrap in ring)
+    int32_t func_id;            // Kernel function ID
+    PTOWorkerType worker_type;  // PTOWorkerType::CUBE or PTOWorkerType::VECTOR
+    int32_t num_args;           // Number of valid arguments
 
     // === Kernel Arguments ===
-    uint64_t args[PTO_MAX_ARGS];          // Arguments passed to kernel
+    uint64_t args[PTO_MAX_ARGS];  // Arguments passed to kernel
 
     // === Kernel Binary ===
-    uint64_t function_bin_addr;           // Device GM address of kernel binary
+    uint64_t function_bin_addr;  // Device GM address of kernel binary
 
     // === Dependency Counts (immutable after submission) ===
-    int32_t fanin_count;                  // Number of producer tasks
-    int32_t fanout_count;                 // Number of consumers + scope_depth
+    int32_t fanin_count;   // Number of producer tasks
+    int32_t fanout_count;  // Number of consumers + scope_depth
 
     // === Dependency Lists (offsets into DepListPool, 0 = empty) ===
-    int32_t fanin_head;                   // Linked list of producer task IDs
-    volatile int32_t fanout_head;         // Linked list of consumer task IDs (grows dynamically)
+    int32_t fanin_head;            // Linked list of producer task IDs
+    volatile int32_t fanout_head;  // Linked list of consumer task IDs (grows dynamically)
 
     // === Output Buffer Info (for heap reclamation) ===
-    int32_t packed_buffer_offset;         // Offset in HeapRing
-    int32_t packed_buffer_size;           // Total size of packed outputs
+    int32_t packed_buffer_offset;  // Offset in HeapRing
+    int32_t packed_buffer_size;    // Total size of packed outputs
 
     // === Concurrency Control ===
     // Spinlock for fanout_head and fanout_count modification
@@ -245,8 +246,8 @@ struct PTOSchedulerState {
  * unreachable garbage and slots are reused.
  */
 struct DepListEntry {
-    int32_t task_id;              // The task ID in this list node
-    int32_t next_offset;          // Offset to next entry (0 = end of list)
+    int32_t task_id;      // The task ID in this list node
+    int32_t next_offset;  // Offset to next entry (0 = end of list)
 };
 
 /**
@@ -259,8 +260,8 @@ struct DepListEntry {
  */
 struct DepListPool {
     DepListEntry* base;
-    int32_t size;         // PTO_DEP_LIST_POOL_SIZE
-    int32_t top;          // Next slot to allocate (wraps around)
+    int32_t size;  // PTO_DEP_LIST_POOL_SIZE
+    int32_t top;   // Next slot to allocate (wraps around)
 };
 
 // =============================================================================
@@ -326,15 +327,11 @@ static inline void spinlock_acquire(volatile int32_t* lock) {
     }
 }
 
-static inline void spinlock_release(volatile int32_t* lock) {
-    __sync_lock_release(lock);
-}
+static inline void spinlock_release(volatile int32_t* lock) { __sync_lock_release(lock); }
 
 /**
  * Ring buffer index calculation (assumes size is power of 2)
  */
-static inline int32_t ring_index(int32_t pos, int32_t size) {
-    return pos & (size - 1);
-}
+static inline int32_t ring_index(int32_t pos, int32_t size) { return pos & (size - 1); }
 
 #endif  // ORCH_BUILD_GRAPH_PTO_RUNTIME_H

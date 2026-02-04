@@ -25,8 +25,8 @@ Runtime::Runtime() {
         tasks[i].end_time = 0;
         tasks[i].state = TaskState::PENDING;
         tasks[i].fanout_refcount = 0;
-        tasks[i].fanin_head = 0;           // Empty list (DepListPool offset encoding)
-        tasks[i].fanout_head = 0;          // Empty list
+        tasks[i].fanin_head = 0;   // Empty list (DepListPool offset encoding)
+        tasks[i].fanout_head = 0;  // Empty list
         tasks[i].fanin_count = 0;
         tasks[i].fanout_lock = 0;
         tasks[i].packed_buffer_offset = 0;
@@ -92,8 +92,8 @@ int Runtime::add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType c
     task->fanout_count = 0;
     task->state = TaskState::PENDING;
     task->fanout_refcount = 0;
-    task->fanin_head = 0;       // Empty list (DepListPool offset encoding)
-    task->fanout_head = 0;      // Empty list
+    task->fanin_head = 0;   // Empty list (DepListPool offset encoding)
+    task->fanout_head = 0;  // Empty list
     task->fanin_count = 0;
     task->fanout_lock = 0;
 
@@ -139,9 +139,7 @@ Task* Runtime::get_task(int task_id) {
     return &tasks[task_id];
 }
 
-int Runtime::get_task_count() const {
-    return next_task_id;
-}
+int Runtime::get_task_count() const { return next_task_id; }
 
 int Runtime::get_initial_ready_tasks(int* ready_tasks) {
     initial_ready_count = 0;
@@ -167,11 +165,12 @@ void Runtime::check_consumed(int task_id) {
     Task* task = &tasks[task_id];
     // Target = fanout_count + 1 (real consumers + scope ref)
     int target = task->fanout_count + 1;
-    if (task->fanout_refcount == target &&
-        task->state == TaskState::COMPLETED) {
+    if (task->fanout_refcount == target && task->state == TaskState::COMPLETED) {
         task->state = TaskState::CONSUMED;
         printf("[PTO] Task %d → CONSUMED (fanout_refcount=%d == fanout_count+1=%d)\n",
-               task_id, task->fanout_refcount, target);
+            task_id,
+            task->fanout_refcount,
+            target);
     }
 }
 
@@ -213,7 +212,13 @@ void Runtime::print_runtime() const {
         int state_idx = static_cast<int>(t->state);
         const char* state_str = (state_idx >= 0 && state_idx <= 4) ? state_names[state_idx] : "UNKNOWN";
         printf("  Task %d: func_id=%d, state=%s, fanin=%d, fanout_count=%d, fanout_refcount=%d, core_type=%d [",
-            i, t->func_id, state_str, t->fanin.load(), t->fanout_count, t->fanout_refcount, t->core_type);
+            i,
+            t->func_id,
+            state_str,
+            t->fanin.load(),
+            t->fanout_count,
+            t->fanout_refcount,
+            t->core_type);
 
         // Traverse fanout list using DepListPool
         int32_t offset = t->fanout_head;
@@ -249,17 +254,11 @@ void Runtime::record_tensor_pair(void* host_ptr, void* dev_ptr, size_t size) {
     printf("[PTO Runtime] Recorded tensor pair: host=%p dev=%p size=%zu\n", host_ptr, dev_ptr, size);
 }
 
-TensorPair* Runtime::get_tensor_pairs() {
-    return tensor_pairs;
-}
+TensorPair* Runtime::get_tensor_pairs() { return tensor_pairs; }
 
-int Runtime::get_tensor_pair_count() const {
-    return tensor_pair_count;
-}
+int Runtime::get_tensor_pair_count() const { return tensor_pair_count; }
 
-void Runtime::clear_tensor_pairs() {
-    tensor_pair_count = 0;
-}
+void Runtime::clear_tensor_pairs() { tensor_pair_count = 0; }
 
 // =============================================================================
 // PTO API Implementation
@@ -271,11 +270,12 @@ void Runtime::pto_init() {
     scope_tasks_top_ = 0;
 
     // Initialize TensorMap
-    tensormap_init(&tensor_map_, tensormap_pool_, PTO_TENSORMAP_POOL_SIZE,
-                   tensormap_buckets_, PTO_TENSORMAP_NUM_BUCKETS);
+    tensormap_init(
+        &tensor_map_, tensormap_pool_, PTO_TENSORMAP_POOL_SIZE, tensormap_buckets_, PTO_TENSORMAP_NUM_BUCKETS);
 
     printf("[PTO] PTO mode initialized (TensorMap: %d buckets, %d pool entries)\n",
-           PTO_TENSORMAP_NUM_BUCKETS, PTO_TENSORMAP_POOL_SIZE);
+        PTO_TENSORMAP_NUM_BUCKETS,
+        PTO_TENSORMAP_POOL_SIZE);
 }
 
 // =============================================================================
@@ -328,8 +328,7 @@ void Runtime::pto_scope_end() {
     int32_t tasks_begin = scope_stack_[--scope_stack_top_];
     int32_t tasks_end = scope_tasks_top_;
 
-    printf("[PTO] Scope end (depth=%d, %d tasks)\n",
-           scope_stack_top_ + 1, tasks_end - tasks_begin);
+    printf("[PTO] Scope end (depth=%d, %d tasks)\n", scope_stack_top_ + 1, tasks_end - tasks_begin);
 
     // Scope releases its reference on each task it directly owns
     // Only tasks pushed to scope_tasks_ by this scope are iterated (RAII)
@@ -337,15 +336,16 @@ void Runtime::pto_scope_end() {
         int32_t tid = scope_tasks_[i];
         tasks[tid].fanout_refcount++;
         int target = tasks[tid].fanout_count + 1;
-        printf("[PTO] Task %d: fanout_refcount++ → %d (scope_end, target=%d)\n",
-               tid, tasks[tid].fanout_refcount, target);
+        printf(
+            "[PTO] Task %d: fanout_refcount++ → %d (scope_end, target=%d)\n", tid, tasks[tid].fanout_refcount, target);
 
         // Check if task can transition to CONSUMED
-        if (tasks[tid].fanout_refcount == target &&
-            tasks[tid].state == TaskState::COMPLETED) {
+        if (tasks[tid].fanout_refcount == target && tasks[tid].state == TaskState::COMPLETED) {
             tasks[tid].state = TaskState::CONSUMED;
             printf("[PTO] Task %d → CONSUMED (via scope_end: fanout_refcount=%d == fanout_count+1=%d)\n",
-                   tid, tasks[tid].fanout_refcount, target);
+                tid,
+                tasks[tid].fanout_refcount,
+                target);
         }
     }
 
@@ -372,8 +372,7 @@ PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
     return new_handle;
 }
 
-int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
-                             PTOParam* params, int32_t param_count) {
+int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOParam* params, int32_t param_count) {
     // Packed output buffer allocation using HeapRing
     // When ring allocation is enabled, allocate all outputs as a single packed buffer
     void* packed_base = nullptr;
@@ -394,13 +393,11 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
         // Single allocation from HeapRing if there are new outputs
         if (total_output_size > 0) {
             // Back-pressure: stall if heap ring is full
-            packed_base = heap_ring_alloc(&heap_ring_, total_output_size,
-                                          &shared_header_.heap_tail);
+            packed_base = heap_ring_alloc(&heap_ring_, total_output_size, &shared_header_.heap_tail);
             packed_buffer_offset = heap_ring_offset(&heap_ring_, packed_base);
             packed_buffer_size = total_output_size;
 
-            printf("[PTO] Task: packed allocation %d bytes at offset %d\n",
-                   total_output_size, packed_buffer_offset);
+            printf("[PTO] Task: packed allocation %d bytes at offset %d\n", total_output_size, packed_buffer_offset);
         }
 
         // Assign sub-offsets within packed buffer
@@ -479,15 +476,13 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
     for (int32_t i = 0; i < param_count; i++) {
         if (params[i].type == PTOParamType::INPUT && params[i].buffer != nullptr) {
             // INPUT: Look up producer for this tensor (skip stale entries via shared_header_)
-            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor,
-                                                shared_header_.last_task_alive);
+            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, shared_header_.last_task_alive);
             if (producer >= 0 && producer != task_id) {
                 add_successor(producer, task_id);
             }
         } else if (params[i].type == PTOParamType::INOUT && params[i].buffer != nullptr) {
             // INOUT: Look up producer (like INPUT) but do NOT register as new producer
-            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor,
-                                                shared_header_.last_task_alive);
+            int32_t producer = tensormap_lookup(&tensor_map_, &params[i].tensor, shared_header_.last_task_alive);
             if (producer >= 0 && producer != task_id) {
                 add_successor(producer, task_id);
             }
@@ -498,8 +493,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
     // Register OUTPUT tensors in TensorMap
     for (int32_t i = 0; i < param_count; i++) {
         if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
-            tensormap_insert(&tensor_map_, &params[i].tensor,
-                           task_id, params[i].buffer->version);
+            tensormap_insert(&tensor_map_, &params[i].tensor, task_id, params[i].buffer->version);
         }
     }
 

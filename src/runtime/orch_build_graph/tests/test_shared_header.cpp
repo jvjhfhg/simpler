@@ -12,14 +12,15 @@
  *   g++ -std=c++17 -I../runtime -o test_phase4 test_phase4_shared_header.cpp ../runtime/runtime.cpp
  */
 
-#include "runtime.h"
-#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include "dep_list_pool.h"
+#include "runtime.h"
 
 // ============================================================================
 // Mock host API
@@ -38,9 +39,7 @@ static void* mock_device_malloc(size_t size) {
     return ptr;
 }
 
-static void mock_device_free(void* ptr) {
-    free(ptr);
-}
+static void mock_device_free(void* ptr) { free(ptr); }
 
 static int mock_copy_to_device(void* dev, const void* host, size_t size) {
     memcpy(dev, host, size);
@@ -63,8 +62,8 @@ static void cleanup_allocations() {
 // Helpers
 // ============================================================================
 
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
@@ -123,15 +122,16 @@ static PTOBufferHandle make_output_handle(int32_t size) {
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define CHECK(cond, msg) do { \
-    if (!(cond)) { \
-        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
-        tests_failed++; \
-    } else { \
-        printf("  PASS: %s\n", msg); \
-        tests_passed++; \
-    } \
-} while (0)
+#define CHECK(cond, msg)                                     \
+    do {                                                     \
+        if (!(cond)) {                                       \
+            printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
+            tests_failed++;                                  \
+        } else {                                             \
+            printf("  PASS: %s\n", msg);                     \
+            tests_passed++;                                  \
+        }                                                    \
+    } while (0)
 
 // Helper: Check if a task ID exists in a dependency list
 static bool dep_list_contains(DepListPool* pool, int32_t head, int32_t task_id) {
@@ -302,8 +302,7 @@ static void test_scheduler_advances_pointers() {
     // Advance heap_tail
     if (last_alive > 0) {
         Task* last_consumed = runtime.get_task(last_alive - 1);
-        int32_t new_heap_tail = last_consumed->packed_buffer_offset
-                              + last_consumed->packed_buffer_size;
+        int32_t new_heap_tail = last_consumed->packed_buffer_offset + last_consumed->packed_buffer_size;
         header->heap_tail = new_heap_tail;
     }
 

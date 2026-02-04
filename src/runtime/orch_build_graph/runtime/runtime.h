@@ -19,12 +19,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
 #include <atomic>
 
-#include "tensor_map.h"    // TensorMap, TensorMapEntry, PTOTensorDescriptor, PTOBufferHandle, PTOParam
-#include "ring_buffer.h"   // TaskRing, HeapRing, PTOSharedHeader, TaskState, Handshake, etc.
-#include "dep_list_pool.h" // DepListPool, DepListEntry for dynamic dependency lists
 #include "common/core_type.h"  // CoreType enum (from platform)
+#include "dep_list_pool.h"     // DepListPool, DepListEntry for dynamic dependency lists
+#include "ring_buffer.h"       // TaskRing, HeapRing, PTOSharedHeader, TaskState, Handshake, etc.
+#include "tensor_map.h"        // TensorMap, TensorMapEntry, TensorDescriptor, PTOBufferHandle, PTOParam
 
 // =============================================================================
 // Configuration Macros
@@ -72,23 +73,23 @@ typedef struct {
     uint64_t function_bin_addr;
     int core_type;
     std::atomic<int> fanin;
-    int fanout_count;                           // Number of consumers (for CONSUMED check)
+    int fanout_count;  // Number of consumers (for CONSUMED check)
     uint64_t start_time;
     uint64_t end_time;
 
     // Task state machine and fanout reference counting
-    TaskState state;                            // Explicit task state (default: PENDING)
-    int fanout_refcount;                        // Completed consumers + scope_end count
+    TaskState state;      // Explicit task state (default: PENDING)
+    int fanout_refcount;  // Completed consumers + scope_end count
 
     // DepListPool-based dependency tracking (offset encoding: 0 = empty)
-    int32_t fanin_head;                         // Head of producer list (DepListPool offset)
-    int32_t fanout_head;                        // Head of consumer list (DepListPool offset)
-    int32_t fanin_count;                        // Number of producers (immutable after submission)
-    volatile int32_t fanout_lock;               // Spinlock for concurrent fanout modification
+    int32_t fanin_head;            // Head of producer list (DepListPool offset)
+    int32_t fanout_head;           // Head of consumer list (DepListPool offset)
+    int32_t fanin_count;           // Number of producers (immutable after submission)
+    volatile int32_t fanout_lock;  // Spinlock for concurrent fanout modification
 
     // Packed output buffer tracking
-    int32_t packed_buffer_offset;               // Offset in HeapRing (for heap reclamation)
-    int32_t packed_buffer_size;                 // Total size of packed outputs
+    int32_t packed_buffer_offset;  // Offset in HeapRing (for heap reclamation)
+    int32_t packed_buffer_size;    // Total size of packed outputs
 } Task;
 
 // =============================================================================
@@ -117,15 +118,15 @@ public:
     Runtime();
 
     // Internal task management (used by pto_submit_task)
-    int add_task(uint64_t *args, int num_args, int func_id, PTOWorkerType core_type = PTOWorkerType::VECTOR);
+    int add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType core_type = PTOWorkerType::VECTOR);
     void add_successor(int from_task, int to_task);
 
     // Task lifecycle helpers
     void check_consumed(int task_id);
 
-    Task *get_task(int task_id);
+    Task* get_task(int task_id);
     int get_task_count() const;
-    int get_initial_ready_tasks(int *ready_tasks);
+    int get_initial_ready_tasks(int* ready_tasks);
 
     void print_runtime() const;
 
@@ -152,8 +153,7 @@ public:
     // --- Task Submission ---
     // Submit task with automatic dependency detection via TensorMap
     // OUTPUT params are allocated implicitly by runtime
-    int pto_submit_task(int32_t func_id, PTOWorkerType worker_type,
-                        PTOParam* params, int32_t param_count);
+    int pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOParam* params, int32_t param_count);
 
     HostApi host_api;
 
@@ -187,8 +187,8 @@ private:
     TaskRing task_ring_;
     PTOTaskDescriptor task_descriptors_[PTO_TASK_WINDOW_SIZE];
     HeapRing heap_ring_;
-    char* heap_base_;                           // Device memory base for HeapRing
-    bool use_ring_allocation_ = false;          // Enable ring allocation after pto_init_rings()
+    char* heap_base_;                   // Device memory base for HeapRing
+    bool use_ring_allocation_ = false;  // Enable ring allocation after pto_init_rings()
 
     // DepListPool for dynamic dependency lists (fanin/fanout)
     DepListPool dep_list_pool_;

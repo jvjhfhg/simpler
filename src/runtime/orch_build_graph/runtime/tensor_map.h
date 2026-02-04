@@ -20,8 +20,9 @@
 #ifndef ORCH_BUILD_GRAPH_TENSOR_MAP_H
 #define ORCH_BUILD_GRAPH_TENSOR_MAP_H
 
-#include "pto_types.h"
 #include <stdint.h>
+
+#include "pto_types.h"
 
 // =============================================================================
 // TensorMap Entry
@@ -34,10 +35,10 @@
  * to find dependencies by looking up overlapping memory regions.
  */
 struct TensorMapEntry {
-    PTOTensorDescriptor tensor;   // Full strided tensor descriptor
-    int32_t producer_task_id;     // Task that produces this tensor
-    int32_t version;              // For in-place update tracking
-    int32_t next_in_bucket;       // Linked list within hash bucket (1-indexed, 0=end)
+    TensorDescriptor tensor;   // Full strided tensor descriptor
+    int32_t producer_task_id;  // Task that produces this tensor
+    int32_t version;           // For in-place update tracking
+    int32_t next_in_bucket;    // Linked list within hash bucket (1-indexed, 0=end)
 };
 
 // =============================================================================
@@ -51,11 +52,11 @@ struct TensorMapEntry {
  * Entries are automatically reclaimed when old tasks are consumed.
  */
 struct TensorMap {
-    TensorMapEntry* pool;         // Ring buffer of entries
-    int32_t pool_size;            // PTO_TENSORMAP_POOL_SIZE
-    int32_t pool_head;            // Next slot to allocate (wraps around)
-    int32_t* buckets;             // Hash bucket heads (1-indexed, 0=empty)
-    int32_t num_buckets;          // PTO_TENSORMAP_NUM_BUCKETS
+    TensorMapEntry* pool;  // Ring buffer of entries
+    int32_t pool_size;     // PTO_TENSORMAP_POOL_SIZE
+    int32_t pool_head;     // Next slot to allocate (wraps around)
+    int32_t* buckets;      // Hash bucket heads (1-indexed, 0=empty)
+    int32_t num_buckets;   // PTO_TENSORMAP_NUM_BUCKETS
 };
 
 // =============================================================================
@@ -71,8 +72,8 @@ struct TensorMap {
  * @param buckets     Array of bucket heads (size = num_buckets)
  * @param num_buckets Number of hash buckets
  */
-static inline void tensormap_init(TensorMap* tm, TensorMapEntry* pool, int32_t pool_size,
-                                  int32_t* buckets, int32_t num_buckets) {
+static inline void tensormap_init(
+    TensorMap* tm, TensorMapEntry* pool, int32_t pool_size, int32_t* buckets, int32_t num_buckets) {
     tm->pool = pool;
     tm->pool_size = pool_size;
     tm->pool_head = 0;
@@ -98,9 +99,7 @@ static inline void tensormap_init(TensorMap* tm, TensorMapEntry* pool, int32_t p
  * @param addr Base address of tensor
  * @return Bucket index (0 to num_buckets-1)
  */
-static inline int32_t tensormap_hash(TensorMap* tm, uint64_t addr) {
-    return (addr >> 6) % tm->num_buckets;
-}
+static inline int32_t tensormap_hash(TensorMap* tm, uint64_t addr) { return (addr >> 6) % tm->num_buckets; }
 
 // =============================================================================
 // Insert Operation
@@ -117,8 +116,8 @@ static inline int32_t tensormap_hash(TensorMap* tm, uint64_t addr) {
  * @param producer_task_id Task ID that produces this tensor
  * @param version          Version number for in-place update tracking
  */
-static inline void tensormap_insert(TensorMap* tm, const PTOTensorDescriptor* tensor,
-                                    int32_t producer_task_id, int32_t version) {
+static inline void tensormap_insert(
+    TensorMap* tm, const TensorDescriptor* tensor, int32_t producer_task_id, int32_t version) {
     // Compute hash bucket
     int32_t bucket = tensormap_hash(tm, tensor->addr);
 
@@ -152,8 +151,7 @@ static inline void tensormap_insert(TensorMap* tm, const PTOTensorDescriptor* te
  * @param last_task_alive Oldest non-consumed task (for staleness check)
  * @return Producer task_id if found, -1 if no overlap
  */
-static inline int32_t tensormap_lookup(TensorMap* tm, const PTOTensorDescriptor* tensor,
-                                       int32_t last_task_alive) {
+static inline int32_t tensormap_lookup(TensorMap* tm, const TensorDescriptor* tensor, int32_t last_task_alive) {
     // Compute hash bucket
     int32_t bucket = tensormap_hash(tm, tensor->addr);
 
@@ -169,7 +167,7 @@ static inline int32_t tensormap_lookup(TensorMap* tm, const PTOTensorDescriptor*
         }
 
         // Check for overlap using appropriate strategy
-        if (tensors_overlap(&entry->tensor, tensor)) {
+        if (tensor->is_overlap(entry->tensor)) {
             return entry->producer_task_id;
         }
 
@@ -191,9 +189,9 @@ static inline int32_t tensormap_lookup(TensorMap* tm, const PTOTensorDescriptor*
  * @param callback        Function called for each overlapping producer
  * @param ctx             User context passed to callback
  */
-template<typename Func>
-static inline void tensormap_lookup_all(TensorMap* tm, const PTOTensorDescriptor* tensor,
-                                        int32_t last_task_alive, Func callback, void* ctx) {
+template <typename Func>
+static inline void tensormap_lookup_all(
+    TensorMap* tm, const TensorDescriptor* tensor, int32_t last_task_alive, Func callback, void* ctx) {
     // Compute hash bucket
     int32_t bucket = tensormap_hash(tm, tensor->addr);
 
@@ -205,7 +203,7 @@ static inline void tensormap_lookup_all(TensorMap* tm, const PTOTensorDescriptor
         // Skip stale entries
         if (entry->producer_task_id >= last_task_alive) {
             // Check for overlap
-            if (tensors_overlap(&entry->tensor, tensor)) {
+            if (tensor->is_overlap(entry->tensor)) {
                 callback(entry->producer_task_id, entry->version, ctx);
             }
         }
@@ -244,7 +242,9 @@ static inline void tensormap_print_stats(TensorMap* tm) {
     }
 
     printf("TensorMap stats: %d entries, max chain length = %d, pool_head = %d\n",
-           total_entries, max_chain, tm->pool_head);
+        total_entries,
+        max_chain,
+        tm->pool_head);
 }
 
 #endif  // PTO_DEBUG

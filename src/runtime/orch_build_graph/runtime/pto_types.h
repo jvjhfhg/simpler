@@ -6,7 +6,7 @@
  * - PTOParam: Parameter descriptor for pto_submit_task API
  * - PTOWorkerType: Worker types for heterogeneous scheduling
  *
- * Tensor descriptor types (PTOTensorDescriptor, PTOOverlapStrategy) are
+ * Tensor descriptor types (TensorDescriptor, PTOOverlapStrategy) are
  * defined in tensor_descriptor.h.
  *
  * This header is independent of orch_build_graph_runtime.h to allow inclusion from runtime.h
@@ -17,6 +17,7 @@
 #define ORCH_BUILD_GRAPH_PTO_TYPES_H
 
 #include <stdint.h>
+
 #include "tensor_descriptor.h"
 
 // =============================================================================
@@ -50,8 +51,8 @@
  * dispatch tasks to AICore workers.
  */
 enum class PTOWorkerType : int32_t {
-    CUBE    = 0,  // AICore-CUBE
-    VECTOR  = 1,  // AICore-VECTOR
+    CUBE = 0,    // AICore-CUBE
+    VECTOR = 1,  // AICore-VECTOR
 };
 
 // Number of worker types (used for array sizing)
@@ -74,9 +75,9 @@ constexpr int32_t PTO_NUM_WORKER_TYPES = 2;
  * See: divergence-to-original-orchestration.md §5, §6
  */
 struct PTOBufferHandle {
-    uint64_t addr;           // Device memory address
-    int32_t size;            // Buffer size in bytes
-    int32_t version;         // Version number (for in-place updates)
+    uint64_t addr;    // Device memory address
+    int32_t size;     // Buffer size in bytes
+    int32_t version;  // Version number (for in-place updates)
     // Note: ref_count removed - buffer lifetime = task lifetime
 };
 
@@ -88,10 +89,10 @@ struct PTOBufferHandle {
  * Parameter Type - Distinguishes inputs, outputs, and in-place updates
  */
 enum class PTOParamType : int32_t {
-    INPUT  = 0,  // Read-only input buffer
+    INPUT = 0,   // Read-only input buffer
     OUTPUT = 1,  // Write-only output buffer (allocated implicitly by runtime)
     SCALAR = 2,  // Raw scalar value (no buffer, no dependency tracking)
-    INOUT  = 3   // In-place update (creates dependency but NOT a new producer)
+    INOUT = 3    // In-place update (creates dependency but NOT a new producer)
 };
 
 /**
@@ -108,10 +109,10 @@ enum class PTOParamType : int32_t {
  *   runtime->pto_submit_task(func_id, worker_type, params, 2);
  */
 struct PTOParam {
-    PTOParamType type;            // PTOParamType::INPUT, PTOParamType::OUTPUT, or PTOParamType::SCALAR
-    PTOTensorDescriptor tensor;   // Full strided descriptor for overlap checking (unused for SCALAR)
-    PTOBufferHandle* buffer;      // Associated buffer handle (nullptr for SCALAR)
-    uint64_t scalar_value;        // Raw value for PTOParamType::SCALAR (e.g., encoded float, int size)
+    PTOParamType type;        // PTOParamType::INPUT, PTOParamType::OUTPUT, or PTOParamType::SCALAR
+    TensorDescriptor tensor;  // Full strided descriptor for overlap checking (unused for SCALAR)
+    PTOBufferHandle* buffer;  // Associated buffer handle (nullptr for SCALAR)
+    uint64_t scalar_value;    // Raw value for PTOParamType::SCALAR (e.g., encoded float, int size)
 };
 
-#endif // ORCH_BUILD_GRAPH_PTO_TYPES_H
+#endif  // ORCH_BUILD_GRAPH_PTO_TYPES_H

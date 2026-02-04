@@ -13,13 +13,14 @@
  *   g++ -std=c++17 -I../runtime -o test_phase2 test_phase2_scope_end.cpp ../runtime/runtime.cpp
  */
 
-#include "runtime.h"
-#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+#include "dep_list_pool.h"
+#include "runtime.h"
 
 // ============================================================================
 // Mock host API
@@ -28,18 +29,20 @@
 static void* mock_device_malloc(size_t size) { return malloc(size); }
 static void mock_device_free(void* ptr) { free(ptr); }
 static int mock_copy_to_device(void* dev, const void* host, size_t size) {
-    memcpy(dev, host, size); return 0;
+    memcpy(dev, host, size);
+    return 0;
 }
 static int mock_copy_from_device(void* host, const void* dev, size_t size) {
-    memcpy(host, dev, size); return 0;
+    memcpy(host, dev, size);
+    return 0;
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
@@ -98,15 +101,16 @@ static PTOBufferHandle make_output_handle(int32_t size) {
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define CHECK(cond, msg) do { \
-    if (!(cond)) { \
-        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
-        tests_failed++; \
-    } else { \
-        printf("  PASS: %s\n", msg); \
-        tests_passed++; \
-    } \
-} while (0)
+#define CHECK(cond, msg)                                     \
+    do {                                                     \
+        if (!(cond)) {                                       \
+            printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
+            tests_failed++;                                  \
+        } else {                                             \
+            printf("  PASS: %s\n", msg);                     \
+            tests_passed++;                                  \
+        }                                                    \
+    } while (0)
 
 // ============================================================================
 // Test 1: Basic scope_end increments fanout_refcount only
@@ -244,58 +248,73 @@ static void test_diamond_scope_consumed() {
     printf("\n--- Execute T0 ---\n");
     task0->state = TaskState::RUNNING;
     task0->state = TaskState::COMPLETED;
-    dep_list_foreach(pool, task0->fanout_head,
+    dep_list_foreach(
+        pool,
+        task0->fanout_head,
         [&](int32_t dep_id, void*) {
             Task* dep = runtime.get_task(dep_id);
-            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
-                dep->state = TaskState::READY;
-        }, nullptr);
+            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1) dep->state = TaskState::READY;
+        },
+        nullptr);
     CHECK(task1->state == TaskState::READY, "T1 → READY");
     CHECK(task2->state == TaskState::READY, "T2 → READY");
 
     printf("\n--- Execute T1 ---\n");
     task1->state = TaskState::RUNNING;
     task1->state = TaskState::COMPLETED;
-    dep_list_foreach(pool, task1->fanout_head,
+    dep_list_foreach(
+        pool,
+        task1->fanout_head,
         [&](int32_t dep_id, void*) {
             Task* dep = runtime.get_task(dep_id);
-            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
-                dep->state = TaskState::READY;
-        }, nullptr);
-    dep_list_foreach(pool, task1->fanin_head,
+            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1) dep->state = TaskState::READY;
+        },
+        nullptr);
+    dep_list_foreach(
+        pool,
+        task1->fanin_head,
         [&](int32_t producer_id, void*) {
             runtime.get_task(producer_id)->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task0->fanout_refcount == 1, "T0 refcount = 1 (T1 done)");
     CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (1 < fanout_count+1=3, scope holds ref)");
 
     printf("\n--- Execute T2 ---\n");
     task2->state = TaskState::RUNNING;
     task2->state = TaskState::COMPLETED;
-    dep_list_foreach(pool, task2->fanout_head,
+    dep_list_foreach(
+        pool,
+        task2->fanout_head,
         [&](int32_t dep_id, void*) {
             Task* dep = runtime.get_task(dep_id);
-            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1)
-                dep->state = TaskState::READY;
-        }, nullptr);
+            if (dep->fanin.fetch_sub(1, std::memory_order_acq_rel) == 1) dep->state = TaskState::READY;
+        },
+        nullptr);
     CHECK(task3->state == TaskState::READY, "T3 → READY");
-    dep_list_foreach(pool, task2->fanin_head,
+    dep_list_foreach(
+        pool,
+        task2->fanin_head,
         [&](int32_t producer_id, void*) {
             runtime.get_task(producer_id)->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task0->fanout_refcount == 2, "T0 refcount = 2 (T1+T2 done)");
     CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (2 < fanout_count+1=3, scope holds ref)");
 
     printf("\n--- Execute T3 ---\n");
     task3->state = TaskState::RUNNING;
     task3->state = TaskState::COMPLETED;
-    dep_list_foreach(pool, task3->fanin_head,
+    dep_list_foreach(
+        pool,
+        task3->fanin_head,
         [&](int32_t producer_id, void*) {
             runtime.get_task(producer_id)->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task1->fanout_refcount == 1, "T1 refcount = 1 (T3 done)");
     CHECK(task1->state == TaskState::COMPLETED, "T1 still COMPLETED (1 < fanout_count+1=2, scope holds ref)");
     CHECK(task2->fanout_refcount == 1, "T2 refcount = 1 (T3 done)");
@@ -534,11 +553,10 @@ static void test_wide_fanout() {
     for (int i = 0; i < N; i++) {
         Task* t = runtime.get_task(task_ids[i]);
         CHECK(t->fanout_count == 0,
-              (std::string("T") + std::to_string(i) + " fanout_count = 0 (no real consumers)").c_str());
+            (std::string("T") + std::to_string(i) + " fanout_count = 0 (no real consumers)").c_str());
         CHECK(t->state == TaskState::COMPLETED,
-              (std::string("T") + std::to_string(i) + " still COMPLETED (scope holds ref)").c_str());
-        if (t->state == TaskState::CONSUMED)
-            consumed_before++;
+            (std::string("T") + std::to_string(i) + " still COMPLETED (scope holds ref)").c_str());
+        if (t->state == TaskState::CONSUMED) consumed_before++;
     }
     CHECK(consumed_before == 0, "0 tasks CONSUMED before scope_end (scope holds refs)");
 
@@ -548,14 +566,10 @@ static void test_wide_fanout() {
     int consumed_after = 0;
     for (int i = 0; i < N; i++) {
         Task* t = runtime.get_task(task_ids[i]);
-        CHECK(t->fanout_count == 0,
-              (std::string("T") + std::to_string(i) + " fanout_count = 0 (unchanged)").c_str());
-        CHECK(t->fanout_refcount == 1,
-              (std::string("T") + std::to_string(i) + " fanout_refcount = 1 (scope)").c_str());
-        CHECK(t->state == TaskState::CONSUMED,
-              (std::string("T") + std::to_string(i) + " → CONSUMED").c_str());
-        if (t->state == TaskState::CONSUMED)
-            consumed_after++;
+        CHECK(t->fanout_count == 0, (std::string("T") + std::to_string(i) + " fanout_count = 0 (unchanged)").c_str());
+        CHECK(t->fanout_refcount == 1, (std::string("T") + std::to_string(i) + " fanout_refcount = 1 (scope)").c_str());
+        CHECK(t->state == TaskState::CONSUMED, (std::string("T") + std::to_string(i) + " → CONSUMED").c_str());
+        if (t->state == TaskState::CONSUMED) consumed_after++;
     }
     CHECK(consumed_after == N, "All 8 tasks CONSUMED after scope_end");
 

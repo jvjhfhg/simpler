@@ -18,25 +18,22 @@
  *   g++ -std=c++17 -I../runtime -o test_phase1 test_phase1_state_machine.cpp ../runtime/runtime.cpp
  */
 
-#include "runtime.h"
-#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 
+#include "dep_list_pool.h"
+#include "runtime.h"
+
 // ============================================================================
 // Mock host API (simple malloc-based)
 // ============================================================================
 
-static void* mock_device_malloc(size_t size) {
-    return malloc(size);
-}
+static void* mock_device_malloc(size_t size) { return malloc(size); }
 
-static void mock_device_free(void* ptr) {
-    free(ptr);
-}
+static void mock_device_free(void* ptr) { free(ptr); }
 
 static int mock_copy_to_device(void* dev, const void* host, size_t size) {
     memcpy(dev, host, size);
@@ -52,8 +49,8 @@ static int mock_copy_from_device(void* host, const void* dev, size_t size) {
 // Helpers (same as pto_example_orch.cpp)
 // ============================================================================
 
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
@@ -112,15 +109,16 @@ static PTOBufferHandle make_output_handle(int32_t size) {
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define CHECK(cond, msg) do { \
-    if (!(cond)) { \
-        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
-        tests_failed++; \
-    } else { \
-        printf("  PASS: %s\n", msg); \
-        tests_passed++; \
-    } \
-} while (0)
+#define CHECK(cond, msg)                                     \
+    do {                                                     \
+        if (!(cond)) {                                       \
+            printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
+            tests_failed++;                                  \
+        } else {                                             \
+            printf("  PASS: %s\n", msg);                     \
+            tests_passed++;                                  \
+        }                                                    \
+    } while (0)
 
 // ============================================================================
 // Helper functions for DepListPool traversal in tests
@@ -348,14 +346,17 @@ static void test_state_transitions() {
     CHECK(task0->state == TaskState::COMPLETED, "T0 → COMPLETED");
 
     // Decrement fanin of T1 and T2 (like aicpu_executor does) using DepListPool
-    dep_list_foreach(pool, task0->fanout_head,
+    dep_list_foreach(
+        pool,
+        task0->fanout_head,
         [&](int32_t dep_id, void*) {
             Task* dep = runtime.get_task(dep_id);
             int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
             if (prev == 1) {
                 dep->state = TaskState::READY;
             }
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task1->state == TaskState::READY, "T1 → READY (T0 completed)");
     CHECK(task2->state == TaskState::READY, "T2 → READY (T0 completed)");
     CHECK(task3->state == TaskState::PENDING, "T3 still PENDING (needs T1 and T2)");
@@ -367,23 +368,29 @@ static void test_state_transitions() {
     CHECK(task1->state == TaskState::COMPLETED, "T1 → COMPLETED");
 
     // T1 completion: decrement T3's fanin using DepListPool
-    dep_list_foreach(pool, task1->fanout_head,
+    dep_list_foreach(
+        pool,
+        task1->fanout_head,
         [&](int32_t dep_id, void*) {
             Task* dep = runtime.get_task(dep_id);
             int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
             if (prev == 1) {
                 dep->state = TaskState::READY;
             }
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task3->state == TaskState::PENDING, "T3 still PENDING (needs T2)");
 
     // T1 completion: increment fanout_refcount for T1's producers using DepListPool
-    dep_list_foreach(pool, task1->fanin_head,
+    dep_list_foreach(
+        pool,
+        task1->fanin_head,
         [&](int32_t producer_id, void*) {
             Task* producer = runtime.get_task(producer_id);
             producer->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task0->fanout_refcount == 2, "T0 fanout_refcount = 2 (T1 + scope)");
     CHECK(task0->state == TaskState::COMPLETED, "T0 still COMPLETED (fanout_refcount=2 < fanout_count+1=3)");
 
@@ -393,23 +400,29 @@ static void test_state_transitions() {
     task2->state = TaskState::COMPLETED;
 
     // T2 completion: decrement T3's fanin using DepListPool
-    dep_list_foreach(pool, task2->fanout_head,
+    dep_list_foreach(
+        pool,
+        task2->fanout_head,
         [&](int32_t dep_id, void*) {
             Task* dep = runtime.get_task(dep_id);
             int prev = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
             if (prev == 1) {
                 dep->state = TaskState::READY;
             }
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task3->state == TaskState::READY, "T3 → READY (both T1, T2 completed)");
 
     // T2 completion: increment fanout_refcount for T2's producers using DepListPool
-    dep_list_foreach(pool, task2->fanin_head,
+    dep_list_foreach(
+        pool,
+        task2->fanin_head,
         [&](int32_t producer_id, void*) {
             Task* producer = runtime.get_task(producer_id);
             producer->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task0->fanout_refcount == 3, "T0 fanout_refcount = 3 (T1+T2+scope)");
     CHECK(task0->state == TaskState::CONSUMED, "T0 → CONSUMED (fanout_refcount=3 == fanout_count+1=3)");
 
@@ -419,12 +432,15 @@ static void test_state_transitions() {
     task3->state = TaskState::COMPLETED;
 
     // T3 completion: increment fanout_refcount for T3's producers (T1, T2) using DepListPool
-    dep_list_foreach(pool, task3->fanin_head,
+    dep_list_foreach(
+        pool,
+        task3->fanin_head,
         [&](int32_t producer_id, void*) {
             Task* producer = runtime.get_task(producer_id);
             producer->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(task1->fanout_refcount == 2, "T1 fanout_refcount = 2 (T3+scope)");
     CHECK(task1->state == TaskState::CONSUMED, "T1 → CONSUMED (fanout_refcount=2 == fanout_count+1=2)");
     CHECK(task2->fanout_refcount == 2, "T2 fanout_refcount = 2 (T3+scope)");
@@ -502,12 +518,15 @@ static void test_chain_topology() {
     taskB->state = TaskState::RUNNING;
     taskB->state = TaskState::COMPLETED;
 
-    dep_list_foreach(pool, taskB->fanin_head,
+    dep_list_foreach(
+        pool,
+        taskB->fanin_head,
         [&](int32_t producer_id, void*) {
             Task* producer = runtime.get_task(producer_id);
             producer->fanout_refcount++;
             runtime.check_consumed(producer_id);
-        }, nullptr);
+        },
+        nullptr);
     CHECK(taskA->state == TaskState::CONSUMED, "A → CONSUMED after B completes");
 
     // B is leaf: check_consumed directly

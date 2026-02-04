@@ -27,18 +27,13 @@
  * - Buffer lifetime = producer task lifetime (no separate buffer ref count)
  */
 
-#include "runtime.h"
 #include <iostream>
 
+#include "runtime.h"
+
 // Helper: create a BoundingBox tensor descriptor
-static PTOTensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    PTOTensorDescriptor t = {};
-    t.addr = addr;
-    t.start_offset = 0;
-    t.strides[0] = 1;
-    t.repeats[0] = size;
-    t.n_dims = 1;
-    t.strategy = PTOOverlapStrategy::BOUNDING_BOX;
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+    TensorDescriptor t(addr, size, 0, {1}, {static_cast<uint64_t>(size)}, 1, 0);
     return t;
 }
 
@@ -73,7 +68,10 @@ static PTOParam make_output_param(PTOBufferHandle* buf, int32_t size) {
 
 // Helper to encode float as uint64_t for scalar params
 static uint64_t float_to_u64(float f) {
-    union { float f32; uint64_t u64; } conv;
+    union {
+        float f32;
+        uint64_t u64;
+    } conv;
     conv.u64 = 0;  // Clear upper bits
     conv.f32 = f;
     return conv.u64;
