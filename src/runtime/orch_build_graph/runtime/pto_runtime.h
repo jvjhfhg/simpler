@@ -308,8 +308,6 @@ struct TensorPair {
 // Forward Declarations (implementations in separate files)
 // =============================================================================
 
-struct PTOOrchestrator;
-struct PTOScheduler;
 struct TensorMap;
 struct TaskRing;
 struct HeapRing;

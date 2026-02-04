@@ -50,7 +50,6 @@ struct PtoScheduler {
 
     int thread_num_{0};
     int cores_total_num_{0};
-    int blockdim_cores_num_{3};
     int thread_cores_num_{0};
     int core_assignments_[MAX_AICPU_THREADS][MAX_CORES_PER_THREAD];
 
