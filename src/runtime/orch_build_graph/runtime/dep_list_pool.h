@@ -1,5 +1,5 @@
 /**
- * Dependency List Pool for PTO Runtime
+ * Dependency List Pool for Orchestration Build Graph Runtime
  *
  * Provides efficient linked list storage for task dependencies (fanin/fanout).
  * Uses ring buffer allocation with implicit deallocation - no explicit free operations.
@@ -24,8 +24,8 @@
  *   Example: 1024 tasks × 2 outputs × 4 consumers = ~8K entries
  */
 
-#ifndef PTO_DEP_LIST_POOL_H
-#define PTO_DEP_LIST_POOL_H
+#ifndef ORCH_BUILD_GRAPH_DEP_LIST_POOL_H
+#define ORCH_BUILD_GRAPH_DEP_LIST_POOL_H
 
 #include "pto_runtime.h"
 
@@ -187,4 +187,4 @@ static inline void dep_list_print(DepListPool* pool, int32_t head, const char* n
 
 #endif  // PTO_DEBUG
 
-#endif  // PTO_DEP_LIST_POOL_H
+#endif  // ORCH_BUILD_GRAPH_DEP_LIST_POOL_H

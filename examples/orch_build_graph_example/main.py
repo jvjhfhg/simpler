@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-PTO Runtime Simulation Example
+Orchestration Build Graph Runtime Simulation Example
 
-This demonstrates the PTO runtime running on the a2a3sim simulation platform,
+This demonstrates the orchestration runtime running on the a2a3sim simulation platform,
 using the formula:
 
     f = (a + b + 1) * (a + b + 2)
 
 With a=2.0, b=3.0, expected result is 42.0 for all elements.
 
-This example validates that the PTO runtime:
+This example validates that the orchestration runtime:
 1. Builds correctly via RuntimeBuilder
 2. Loads orchestration and builds task graph via pto_submit_task()
 3. Schedules and executes tasks on simulated AICore workers
@@ -43,21 +43,21 @@ except ImportError as e:
 
 def main():
     device_id = 0
-    print("\n=== PTO Runtime Simulation ===")
+    print("\n=== Orchestration Build Graph Runtime Simulation ===")
 
-    # Build PTO runtime
-    print("\n=== Building PTO Runtime (Simulation) ===")
+    # Build orchestration runtime
+    print("\n=== Building Orchestration Runtime (Simulation) ===")
     builder = RuntimeBuilder(platform="a2a3sim")
     pto_compiler = builder.get_pto_compiler()
     print(f"Available runtimes: {builder.list_runtimes()}")
     try:
-        host_binary, aicpu_binary, aicore_binary = builder.build("pto_runtime")
+        host_binary, aicpu_binary, aicore_binary = builder.build("orch_build_graph")
     except Exception as e:
         print(f"Error: Failed to build runtime libraries: {e}")
         return -1
 
     # Load runtime library and get Runtime class
-    print("\n=== Loading PTO Runtime Library ===")
+    print("\n=== Loading Orchestration Runtime Library ===")
     Runtime = bind_host_binary(host_binary)
     print(f"Loaded runtime ({len(host_binary)} bytes)")
 
@@ -71,7 +71,7 @@ def main():
     orch_so_binary = pto_compiler.compile_orchestration(
         ORCHESTRATION["source"],
         extra_include_dirs=[
-            str(runtime_root / "src" / "runtime" / "pto_runtime" / "runtime"),  # for runtime.h
+            str(runtime_root / "src" / "runtime" / "orch_build_graph" / "runtime"),  # for runtime.h
         ] + pto_compiler.get_platform_include_dirs()
     )
     print(f"Compiled orchestration: {len(orch_so_binary)} bytes")
@@ -123,12 +123,12 @@ def main():
     ]
 
     # Create and initialize runtime
-    print("\n=== Creating and Initializing PTO Runtime ===")
+    print("\n=== Creating and Initializing Orchestration Runtime ===")
     runtime = Runtime()
     runtime.initialize(orch_so_binary, ORCHESTRATION["function_name"], func_args)
 
     # Execute runtime (simulation: uses threads)
-    print("\n=== Executing PTO Runtime (Simulation) ===")
+    print("\n=== Executing Orchestration Runtime (Simulation) ===")
     launch_runtime(runtime,
                    aicpu_thread_num=3,
                    block_dim=3,

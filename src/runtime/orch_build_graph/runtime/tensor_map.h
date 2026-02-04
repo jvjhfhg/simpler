@@ -1,5 +1,5 @@
 /**
- * TensorMap for PTO Runtime
+ * TensorMap for Orchestration Build Graph Runtime
  *
  * Provides automatic dependency tracking via memory region lookup with
  * strided tensor support and overlap strategies.
@@ -17,8 +17,8 @@
  * See: divergence-to-original-orchestration.md §6, §7
  */
 
-#ifndef TENSOR_MAP_H
-#define TENSOR_MAP_H
+#ifndef ORCH_BUILD_GRAPH_TENSOR_MAP_H
+#define ORCH_BUILD_GRAPH_TENSOR_MAP_H
 
 #include "pto_types.h"
 #include <stdint.h>
@@ -249,4 +249,4 @@ static inline void tensormap_print_stats(TensorMap* tm) {
 
 #endif  // PTO_DEBUG
 
-#endif  // TENSOR_MAP_H
+#endif  // ORCH_BUILD_GRAPH_TENSOR_MAP_H

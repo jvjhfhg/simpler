@@ -1,8 +1,8 @@
 """
-Golden script for pto_runtime_example.
+Golden script for orch_build_graph_example.
 
 This script defines the input data generation and expected output computation
-for the PTO runtime simulation example (a2a3sim platform).
+for the orchestration runtime simulation example (a2a3sim platform).
 
 Computation:
     f = (a + b + 1) * (a + b + 2)
@@ -15,7 +15,7 @@ import numpy as np
 __outputs__ = ["f"]
 
 # Tensor order for orchestration function arguments
-# This MUST match the order expected by build_pto_example_graph in pto_example_orch.cpp
+# This MUST match the order expected by build_orch_example_graph in orch_example_orch.cpp
 # Args layout: [ptr_a, ptr_b, ptr_f, size_a, size_b, size_f, SIZE]
 TENSOR_ORDER = ["a", "b", "f"]
 
