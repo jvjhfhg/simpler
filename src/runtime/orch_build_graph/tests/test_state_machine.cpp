@@ -55,8 +55,8 @@ static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
     t.start_offset = 0;
     t.strides[0] = 1;
     t.repeats[0] = size;
-    t.n_dims = 1;
-    t.strategy = PTOOverlapStrategy::BOUNDING_BOX;
+    t.ndims = 1;
+    t.overlap_type = OverlapType::Fuzzy;
     return t;
 }
 
