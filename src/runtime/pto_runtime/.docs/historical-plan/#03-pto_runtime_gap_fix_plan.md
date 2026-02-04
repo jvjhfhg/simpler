@@ -40,7 +40,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | Phase 4: PTOSharedHeader and TensorMap Staleness | ✅ Completed | 2026-02-02 |
 | Phase 5: Back-Pressure Flow Control | ✅ Completed | 2026-02-03 |
 | Phase 6: DepListPool Integration | ✅ Completed | 2026-02-04 |
-| Phase 7: Extended Worker Types | ⏳ Pending | - |
+| Phase 7: Extended Worker Types | ❌ Discarded | - |
 
 ---
 
@@ -437,9 +437,11 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 
 ---
 
-## Phase 7: Extended Worker Types
+## Phase 7: Extended Worker Types ❌ DISCARDED
 
-**Gaps addressed:** Gap 9 (Worker Types)
+**Status:** ❌ Discarded - approach not viable
+
+**Gaps addressed:** Gap 9 (Worker Types) - remains unaddressed
 
 **Rationale:** Independent extension adding AICPU and Accelerator as dispatchable worker types.
 
@@ -492,7 +494,7 @@ Gap 9 (Worker Types) ── standalone, extends scheduler
 | 4 | #7 PTOSharedHeader, #8 TensorMap staleness | Medium | Phase 3 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 5 | #10 Back-pressure | Medium | Phase 3+4 | `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
 | 6 | #6 DepListPool | Low | Phase 1 | `runtime.h`, `runtime.cpp`, `aicpu_executor.cpp` | ✅ Done |
-| 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` | ⏳ |
+| 7 | #9 Worker types | Low | None | `pto_types.h`, `aicpu_executor.cpp` | ❌ Discarded |
 
 ---
 
