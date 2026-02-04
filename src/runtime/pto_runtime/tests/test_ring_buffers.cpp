@@ -14,6 +14,7 @@
  */
 
 #include "runtime.h"
+#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>

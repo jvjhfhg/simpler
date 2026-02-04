@@ -25,12 +25,13 @@ Runtime::Runtime() {
         tasks[i].end_time = 0;
         tasks[i].state = TaskState::PENDING;
         tasks[i].fanout_refcount = 0;
-        tasks[i].fanin_producer_count = 0;
+        tasks[i].fanin_head = 0;           // Empty list (DepListPool offset encoding)
+        tasks[i].fanout_head = 0;          // Empty list
+        tasks[i].fanin_count = 0;
+        tasks[i].fanout_lock = 0;
         tasks[i].packed_buffer_offset = 0;
         tasks[i].packed_buffer_size = 0;
         memset(tasks[i].args, 0, sizeof(tasks[i].args));
-        memset(tasks[i].fanout, 0, sizeof(tasks[i].fanout));
-        memset(tasks[i].fanin_producers, 0, sizeof(tasks[i].fanin_producers));
     }
     next_task_id = 0;
     initial_ready_count = 0;
@@ -49,6 +50,9 @@ Runtime::Runtime() {
     memset(&task_ring_, 0, sizeof(task_ring_));
     memset(&heap_ring_, 0, sizeof(heap_ring_));
     memset(&shared_header_, 0, sizeof(shared_header_));
+
+    // Initialize DepListPool
+    dep_list_pool_init(&dep_list_pool_, dep_list_entries_, PTO_DEP_LIST_POOL_SIZE);
 }
 
 // =============================================================================
@@ -88,8 +92,10 @@ int Runtime::add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType c
     task->fanout_count = 0;
     task->state = TaskState::PENDING;
     task->fanout_refcount = 0;
-    task->fanin_producer_count = 0;
-    memset(task->fanout, 0, sizeof(task->fanout));
+    task->fanin_head = 0;       // Empty list (DepListPool offset encoding)
+    task->fanout_head = 0;      // Empty list
+    task->fanin_count = 0;
+    task->fanout_lock = 0;
 
     return task_id;
 }
@@ -108,20 +114,18 @@ void Runtime::add_successor(int from_task, int to_task) {
     Task* from = &tasks[from_task];
     Task* to = &tasks[to_task];
 
-    if (from->fanout_count >= RUNTIME_MAX_FANOUT) {
-        fprintf(stderr, "[PTO Runtime] ERROR: Fanout overflow for task %d\n", from_task);
-        return;
-    }
+    // Add to_task to from's fanout list (with spinlock for concurrent access)
+    spinlock_acquire(&from->fanout_lock);
+    from->fanout_head = dep_list_prepend(&dep_list_pool_, from->fanout_head, to_task);
+    from->fanout_count++;
+    spinlock_release(&from->fanout_lock);
 
-    from->fanout[from->fanout_count++] = to_task;
+    // Add from_task to to's fanin list (fanin list is only modified during submission)
+    to->fanin_head = dep_list_prepend(&dep_list_pool_, to->fanin_head, from_task);
+    to->fanin_count++;
+
+    // Increment fanin counter for dependency tracking
     to->fanin++;
-
-    // Record reverse dependency (producer → consumer tracking)
-    if (to->fanin_producer_count < RUNTIME_MAX_ARGS) {
-        to->fanin_producers[to->fanin_producer_count++] = from_task;
-    } else {
-        fprintf(stderr, "[PTO Runtime] WARNING: fanin_producers overflow for task %d\n", to_task);
-    }
 }
 
 // =============================================================================
@@ -182,6 +186,7 @@ void Runtime::print_runtime() const {
     printf("[PTO Runtime] Task Runtime Status\n");
     printf("========================================================================\n");
     printf("  Total tasks: %d, last_task_alive: %d\n", next_task_id, last_task_alive_);
+    printf("  DepListPool: top=%d / %d\n", dep_list_pool_.top, dep_list_pool_.size);
 
     printf("\nInitially Ready Tasks (fanin==0):\n");
     printf("------------------------------------------------------------------------\n");
@@ -209,8 +214,16 @@ void Runtime::print_runtime() const {
         const char* state_str = (state_idx >= 0 && state_idx <= 4) ? state_names[state_idx] : "UNKNOWN";
         printf("  Task %d: func_id=%d, state=%s, fanin=%d, fanout_count=%d, fanout_refcount=%d, core_type=%d [",
             i, t->func_id, state_str, t->fanin.load(), t->fanout_count, t->fanout_refcount, t->core_type);
-        for (int j = 0; j < t->fanout_count; j++) {
-            printf("%d%s", t->fanout[j], j < t->fanout_count - 1 ? "," : "");
+
+        // Traverse fanout list using DepListPool
+        int32_t offset = t->fanout_head;
+        bool first = true;
+        while (offset != 0) {
+            DepListEntry* entry = dep_list_get(const_cast<DepListPool*>(&dep_list_pool_), offset);
+            if (!first) printf(",");
+            printf("%d", entry->task_id);
+            offset = entry->next_offset;
+            first = false;
         }
         printf("]\n");
         if (t->state == TaskState::CONSUMED) consumed_count++;

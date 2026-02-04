@@ -6,6 +6,7 @@
  */
 
 #include "runtime.h"
+#include "dep_list_pool.h"
 
 #include <atomic>
 #include <cstdint>
@@ -293,32 +294,36 @@ int PtoScheduler::schedule_and_dispatch(Runtime& runtime, int thread_idx, const 
 
                 DEV_INFO("PTO Thread %d: Core %d completed task %d", thread_idx, core_id, task->task_id);
 
-                // Notify dependent tasks (decrement their fanin)
-                for (int j = 0; j < task->fanout_count; j++) {
-                    int dep_id = task->fanout[j];
-                    Task* dep = runtime.get_task(dep_id);
+                // Get DepListPool for traversing dependency lists
+                DepListPool* dep_pool = runtime.get_dep_list_pool();
 
-                    int prev_fanin = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
+                // Notify dependent tasks (decrement their fanin) using DepListPool
+                dep_list_foreach(dep_pool, task->fanout_head,
+                    [&](int32_t dep_id, void*) {
+                        Task* dep = runtime.get_task(dep_id);
+                        if (dep == nullptr) return;
 
-                    // If this was the last dependency, task becomes ready
-                    if (prev_fanin == 1) {
-                        // Transition dependent to READY
-                        dep->state = TaskState::READY;
-                        int worker_type = dep->core_type;
-                        enqueue_ready_task(dep_id, worker_type);
-                        DEV_INFO("PTO Thread %d: Task %d now ready (worker_type=%d)", thread_idx, dep_id, worker_type);
-                    }
-                }
+                        int prev_fanin = dep->fanin.fetch_sub(1, std::memory_order_acq_rel);
 
-                // Increment fanout_refcount for each producer
-                for (int j = 0; j < task->fanin_producer_count; j++) {
-                    int producer_id = task->fanin_producers[j];
-                    Task* producer = runtime.get_task(producer_id);
-                    if (producer != nullptr) {
-                        producer->fanout_refcount++;
-                        runtime.check_consumed(producer_id);
-                    }
-                }
+                        // If this was the last dependency, task becomes ready
+                        if (prev_fanin == 1) {
+                            // Transition dependent to READY
+                            dep->state = TaskState::READY;
+                            int worker_type = dep->core_type;
+                            enqueue_ready_task(dep_id, worker_type);
+                            DEV_INFO("PTO Thread %d: Task %d now ready (worker_type=%d)", thread_idx, dep_id, worker_type);
+                        }
+                    }, nullptr);
+
+                // Increment fanout_refcount for each producer using DepListPool
+                dep_list_foreach(dep_pool, task->fanin_head,
+                    [&](int32_t producer_id, void*) {
+                        Task* producer = runtime.get_task(producer_id);
+                        if (producer != nullptr) {
+                            producer->fanout_refcount++;
+                            runtime.check_consumed(producer_id);
+                        }
+                    }, nullptr);
 
                 // Advance last_task_alive and heap_tail
                 // Scan forward from current last_task_alive while tasks are CONSUMED

@@ -13,6 +13,7 @@
  */
 
 #include "runtime.h"
+#include "dep_list_pool.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -131,6 +132,17 @@ static int tests_failed = 0;
         tests_passed++; \
     } \
 } while (0)
+
+// Helper: Check if a task ID exists in a dependency list
+static bool dep_list_contains(DepListPool* pool, int32_t head, int32_t task_id) {
+    int32_t offset = head;
+    while (offset != 0) {
+        DepListEntry* entry = dep_list_get(pool, offset);
+        if (entry->task_id == task_id) return true;
+        offset = entry->next_offset;
+    }
+    return false;
+}
 
 // ============================================================================
 // Test 1: Shared header initialization
@@ -431,11 +443,12 @@ static void test_fresh_task_dependency() {
 
     Task* task0 = runtime.get_task(t0);
     Task* task1 = runtime.get_task(t1);
+    DepListPool* pool = runtime.get_dep_list_pool();
 
     // T0 is NOT consumed (last_task_alive = 0, T0 id = 0, 0 >= 0, so not stale)
     CHECK(task1->fanin.load() == 1, "T1 has 1 dependency (T0 is fresh, not stale)");
     CHECK(task0->fanout_count == 1, "T0 has 1 consumer");
-    CHECK(task0->fanout[0] == t1, "T0's consumer is T1");
+    CHECK(dep_list_contains(pool, task0->fanout_head, t1), "T0's consumer list contains T1");
 
     runtime.pto_scope_end();
 }
