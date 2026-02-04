@@ -80,14 +80,15 @@ compile_test() {
 
     echo -ne "  Compiling ${src_file}... "
 
-    if $COMPILER $CFLAGS -o "$exe_name" "$src_file" $RUNTIME_SRC 2>/tmp/compile_error.txt; then
+    local compile_output
+    if compile_output=$($COMPILER $CFLAGS -o "$exe_name" "$src_file" $RUNTIME_SRC 2>&1); then
         echo -e "${GREEN}OK${NC}"
         EXECUTABLES+=("$exe_name")
         return 0
     else
         echo -e "${RED}FAILED${NC}"
         if $VERBOSE; then
-            cat /tmp/compile_error.txt
+            echo "$compile_output"
         fi
         return 1
     fi
