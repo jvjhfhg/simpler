@@ -1,5 +1,5 @@
 /**
- * PTO Runtime - Parallel Task Orchestration Runtime
+ * Orchestration Build Graph Runtime - Parallel Task Orchestration Runtime
  *
  * This runtime supports dynamic task submission with automatic dependency detection
  * via TensorMap, scope-based buffer lifecycle management, and ring buffer architecture
@@ -18,8 +18,8 @@
  * - Workers: Execute kernels on AICore/Vector/AICPU units
  */
 
-#ifndef PTO_RUNTIME_H
-#define PTO_RUNTIME_H
+#ifndef ORCH_BUILD_GRAPH_PTO_RUNTIME_H
+#define ORCH_BUILD_GRAPH_PTO_RUNTIME_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -337,4 +337,4 @@ static inline int32_t ring_index(int32_t pos, int32_t size) {
     return pos & (size - 1);
 }
 
-#endif  // PTO_RUNTIME_H
+#endif  // ORCH_BUILD_GRAPH_PTO_RUNTIME_H

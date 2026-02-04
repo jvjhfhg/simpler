@@ -9,8 +9,8 @@
  * See: divergence-to-original-orchestration.md §6, §7
  */
 
-#ifndef TENSOR_DESCRIPTOR_H
-#define TENSOR_DESCRIPTOR_H
+#ifndef ORCH_BUILD_GRAPH_TENSOR_DESCRIPTOR_H
+#define ORCH_BUILD_GRAPH_TENSOR_DESCRIPTOR_H
 
 #include <stdint.h>
 
@@ -89,4 +89,4 @@ struct PTOTensorDescriptor {
  */
 bool tensors_overlap(const PTOTensorDescriptor* a, const PTOTensorDescriptor* b);
 
-#endif  // TENSOR_DESCRIPTOR_H
+#endif  // ORCH_BUILD_GRAPH_TENSOR_DESCRIPTOR_H

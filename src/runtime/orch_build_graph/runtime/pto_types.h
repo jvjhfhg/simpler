@@ -1,7 +1,7 @@
 /**
- * PTO Types - Data structures for PTO runtime extensions
+ * Orchestration Build Graph Types - Data structures for orchestration runtime extensions
  *
- * Standalone header defining PTO-specific types for:
+ * Standalone header defining orchestration-specific types for:
  * - PTOBufferHandle: Buffer with version tracking for in-place updates
  * - PTOParam: Parameter descriptor for pto_submit_task API
  * - PTOWorkerType: Worker types for heterogeneous scheduling
@@ -9,12 +9,12 @@
  * Tensor descriptor types (PTOTensorDescriptor, PTOOverlapStrategy) are
  * defined in tensor_descriptor.h.
  *
- * This header is independent of pto_runtime.h to allow inclusion from runtime.h
+ * This header is independent of orch_build_graph_runtime.h to allow inclusion from runtime.h
  * without type conflicts (Handshake, TensorPair, HostApi).
  */
 
-#ifndef PTO_TYPES_H
-#define PTO_TYPES_H
+#ifndef ORCH_BUILD_GRAPH_PTO_TYPES_H
+#define ORCH_BUILD_GRAPH_PTO_TYPES_H
 
 #include <stdint.h>
 #include "tensor_descriptor.h"
@@ -114,4 +114,4 @@ struct PTOParam {
     uint64_t scalar_value;        // Raw value for PTOParamType::SCALAR (e.g., encoded float, int size)
 };
 
-#endif // PTO_TYPES_H
+#endif // ORCH_BUILD_GRAPH_PTO_TYPES_H

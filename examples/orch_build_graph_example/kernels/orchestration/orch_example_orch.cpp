@@ -1,5 +1,5 @@
 /**
- * PTO Comprehensive Test Suite (Corrected: Scope-Based Lifecycle)
+ * Orchestration Comprehensive Test Suite (Corrected: Scope-Based Lifecycle)
  *
  * This file combines three test scenarios into a comprehensive validation:
  *
@@ -100,16 +100,16 @@ static PTOBufferHandle make_output_handle(int32_t size) {
 extern "C" {
 
 /**
- * Build comprehensive PTO test graph combining all test scenarios.
+ * Build comprehensive orchestration test graph combining all test scenarios.
  *
  * The output buffer is divided into three sections:
  * - Section 0: Diamond pattern result (f = (a+b+1)*(a+b+2))
  * - Section 1: In-place chain result  (g = a+4)
  * - Section 2: Multi-consumer result  (h = 3a+6)
  */
-int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
+int build_orch_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     if (arg_count < 7) {
-        std::cerr << "build_pto_example_graph: Expected at least 7 args, got " << arg_count << '\n';
+        std::cerr << "build_orch_example_graph: Expected at least 7 args, got " << arg_count << '\n';
         return -1;
     }
 
@@ -121,11 +121,11 @@ int build_pto_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     size_t size_f = static_cast<size_t>(args[5]);
     int SIZE = static_cast<int>(args[6]);
 
-    std::cout << "\n=== PTO Comprehensive Test Suite ===" << '\n';
+    std::cout << "\n=== Orchestration Comprehensive Test Suite ===" << '\n';
     std::cout << "Testing: Diamond pattern, In-place updates, Multi-consumer\n";
     std::cout << "SIZE: " << SIZE << " elements\n";
 
-    // Initialize PTO mode
+    // Initialize orchestration mode
     runtime->pto_init();
 
     int32_t BYTES = SIZE * sizeof(float);

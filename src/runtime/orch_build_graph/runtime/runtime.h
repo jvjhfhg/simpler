@@ -1,8 +1,8 @@
 /**
- * PTO Runtime - Runtime Interface
+ * Orchestration Build Graph Runtime - Runtime Interface
  *
  * This provides a Runtime class compatible with the existing platform layer,
- * allowing the PTO runtime to work with the same infrastructure as host_build_graph.
+ * allowing the orchestration runtime to work with the same infrastructure as host_build_graph.
  *
  * PTO API: pto_scope_begin(), pto_scope_end(), pto_submit_task(), pto_version_inc()
  * Dependencies are detected automatically via TensorMap.
@@ -12,8 +12,8 @@
  * pto_submit_task() but PTO mode is always enabled.
  */
 
-#ifndef RUNTIME_H
-#define RUNTIME_H
+#ifndef ORCH_BUILD_GRAPH_RUNTIME_H
+#define ORCH_BUILD_GRAPH_RUNTIME_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -205,4 +205,4 @@ private:
     PTOSharedHeader shared_header_;
 };
 
-#endif  // RUNTIME_H
+#endif  // ORCH_BUILD_GRAPH_RUNTIME_H

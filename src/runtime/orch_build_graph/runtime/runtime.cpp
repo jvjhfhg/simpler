@@ -1,5 +1,5 @@
 /**
- * PTO Runtime - Runtime Implementation
+ * Orchestration Build Graph Runtime - Runtime Implementation
  *
  * PTO mode is always enabled. The constructor auto-initializes TensorMap
  * for automatic dependency tracking.

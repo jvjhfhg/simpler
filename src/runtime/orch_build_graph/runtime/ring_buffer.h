@@ -1,5 +1,5 @@
 /**
- * Ring Buffer Infrastructure for PTO Runtime
+ * Ring Buffer Infrastructure for Orchestration Build Graph Runtime
  *
  * Provides O(1) allocation with implicit deallocation and zero fragmentation.
  * All dynamic data uses ring buffers - no malloc/free needed.
@@ -21,8 +21,8 @@
  * - Prevents complex wraparound handling in kernels
  */
 
-#ifndef PTO_RING_BUFFER_H
-#define PTO_RING_BUFFER_H
+#ifndef ORCH_BUILD_GRAPH_RING_BUFFER_H
+#define ORCH_BUILD_GRAPH_RING_BUFFER_H
 
 #include "pto_runtime.h"
 
@@ -229,4 +229,4 @@ static inline void heap_ring_init(HeapRing* ring, char* base, int32_t size) {
     ring->top = 0;
 }
 
-#endif  // PTO_RING_BUFFER_H
+#endif  // ORCH_BUILD_GRAPH_RING_BUFFER_H

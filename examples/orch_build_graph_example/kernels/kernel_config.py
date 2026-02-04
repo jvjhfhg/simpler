@@ -1,7 +1,7 @@
 """
-Kernel and Orchestration Configuration (PTO Runtime)
+Kernel and Orchestration Configuration (Orchestration Build Graph Runtime)
 
-Defines the kernels and orchestration function used by the PTO runtime example.
+Defines the kernels and orchestration function used by the orchestration runtime example.
 PTO mode is the default and only mode.
 """
 
@@ -9,10 +9,10 @@ from pathlib import Path
 
 _KERNELS_ROOT = Path(__file__).parent
 
-# PTO Orchestration (default)
+# Orchestration function (default)
 ORCHESTRATION = {
-    "source": str(_KERNELS_ROOT / "orchestration" / "pto_example_orch.cpp"),
-    "function_name": "build_pto_example_graph",
+    "source": str(_KERNELS_ROOT / "orchestration" / "orch_example_orch.cpp"),
+    "function_name": "build_orch_example_graph",
 }
 
 # Kernel configs (simulation kernels, compiled with g++)
