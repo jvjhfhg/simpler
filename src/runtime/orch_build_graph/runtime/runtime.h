@@ -183,7 +183,6 @@ private:
     PTOTaskDescriptor task_descriptors_[PTO_TASK_WINDOW_SIZE];
     HeapRing heap_ring_;
     char* heap_base_;                   // Device memory base for HeapRing
-    bool use_ring_allocation_ = false;  // Enable ring allocation after pto_init_rings()
 
     // DepListPool for dynamic dependency lists (fanin/fanout)
     DepListPool dep_list_pool_;

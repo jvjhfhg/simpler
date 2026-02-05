@@ -46,7 +46,6 @@ Runtime::Runtime() {
 
     // Initialize ring buffer state
     heap_base_ = nullptr;
-    use_ring_allocation_ = false;
     memset(&task_ring_, 0, sizeof(task_ring_));
     memset(&heap_ring_, 0, sizeof(heap_ring_));
     memset(&shared_header_, 0, sizeof(shared_header_));
@@ -66,18 +65,10 @@ int Runtime::add_task(uint64_t* args, int num_args, int func_id, PTOWorkerType c
     }
 
     int task_id;
-    if (use_ring_allocation_) {
-        // Back-pressure: stall if task ring is full
-        task_id = task_ring_alloc(&task_ring_, &shared_header_.last_task_alive);
-        // Map ring slot back to absolute task ID
-        task_id = next_task_id++;
-    } else {
-        if (next_task_id >= RUNTIME_MAX_TASKS) {
-            fprintf(stderr, "[PTO Runtime] ERROR: Task table full (max=%d)\n", RUNTIME_MAX_TASKS);
-            return -1;
-        }
-        task_id = next_task_id++;
-    }
+    // Back-pressure: stall if task ring is full
+    task_id = task_ring_alloc(&task_ring_, &shared_header_.last_task_alive);
+    // Map ring slot back to absolute task ID
+    task_id = next_task_id++;
     Task* task = &tasks[task_id];
 
     task->task_id = task_id;
@@ -273,16 +264,6 @@ void Runtime::pto_init() {
     tensormap_init(
         &tensor_map_, tensormap_pool_, PTO_TENSORMAP_POOL_SIZE, tensormap_buckets_, PTO_TENSORMAP_NUM_BUCKETS);
 
-    printf("[PTO] PTO mode initialized (TensorMap: %d buckets, %d pool entries)\n",
-        PTO_TENSORMAP_NUM_BUCKETS,
-        PTO_TENSORMAP_POOL_SIZE);
-}
-
-// =============================================================================
-// Ring Buffer Initialization
-// =============================================================================
-
-void Runtime::pto_init_rings() {
     // Initialize TaskRing with task descriptors array
     task_ring_init(&task_ring_, task_descriptors_, PTO_TASK_WINDOW_SIZE);
 
@@ -297,12 +278,21 @@ void Runtime::pto_init_rings() {
     // Initialize shared header
     memset(&shared_header_, 0, sizeof(shared_header_));
 
-    // Enable ring-based allocation
-    use_ring_allocation_ = true;
-
+    printf("[PTO] PTO mode initialized (TensorMap: %d buckets, %d pool entries)\n",
+        PTO_TENSORMAP_NUM_BUCKETS,
+        PTO_TENSORMAP_POOL_SIZE);
     printf("[PTO] Ring buffers initialized:\n");
     printf("      TaskRing: %d slots\n", PTO_TASK_WINDOW_SIZE);
     printf("      HeapRing: %d bytes at %p\n", PTO_HEAP_SIZE, (void*)heap_base_);
+}
+
+// =============================================================================
+// Ring Buffer Initialization
+// =============================================================================
+
+void Runtime::pto_init_rings() {
+    // No-op: Ring buffers are now initialized in pto_init()
+    // This function is kept for backward compatibility
 }
 
 // =============================================================================
@@ -381,59 +371,42 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
     }
 
     // Packed output buffer allocation using HeapRing
-    // When ring allocation is enabled, allocate all outputs as a single packed buffer
+    // Allocate all outputs as a single packed buffer
     void* packed_base = nullptr;
     int32_t packed_buffer_offset = 0;
     int32_t packed_buffer_size = 0;
 
-    if (use_ring_allocation_) {
-        // Calculate total output size for new buffers (addr == 0)
-        int32_t total_output_size = 0;
-        for (int32_t i = 0; i < param_count; i++) {
-            if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
-                if (params[i].buffer->addr == 0) {
-                    total_output_size += ALIGN_UP(params[i].buffer->size, PTO_ALIGNMENT);
-                }
+    // Calculate total output size for new buffers (addr == 0)
+    int32_t total_output_size = 0;
+    for (int32_t i = 0; i < param_count; i++) {
+        if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
+            if (params[i].buffer->addr == 0) {
+                total_output_size += ALIGN_UP(params[i].buffer->size, PTO_ALIGNMENT);
             }
         }
+    }
 
-        // Single allocation from HeapRing if there are new outputs
-        if (total_output_size > 0) {
-            // Back-pressure: stall if heap ring is full
-            packed_base = heap_ring_alloc(&heap_ring_, total_output_size, &shared_header_.heap_tail);
-            packed_buffer_offset = heap_ring_offset(&heap_ring_, packed_base);
-            packed_buffer_size = total_output_size;
+    // Single allocation from HeapRing if there are new outputs
+    if (total_output_size > 0) {
+        // Back-pressure: stall if heap ring is full
+        packed_base = heap_ring_alloc(&heap_ring_, total_output_size, &shared_header_.heap_tail);
+        packed_buffer_offset = heap_ring_offset(&heap_ring_, packed_base);
+        packed_buffer_size = total_output_size;
 
-            printf("[PTO] Task: packed allocation %d bytes at offset %d\n", total_output_size, packed_buffer_offset);
-        }
+        printf("[PTO] Task: packed allocation %d bytes at offset %d\n", total_output_size, packed_buffer_offset);
+    }
 
-        // Assign sub-offsets within packed buffer
-        int32_t offset = 0;
-        for (int32_t i = 0; i < param_count; i++) {
-            if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
-                if (params[i].buffer->addr == 0) {
-                    // New buffer: assign address within packed buffer
-                    params[i].buffer->addr = (uint64_t)((char*)packed_base + offset);
-                    offset += ALIGN_UP(params[i].buffer->size, PTO_ALIGNMENT);
-                }
-                // Update tensor descriptor with address
-                params[i].tensor.buffer.addr = params[i].buffer->addr;
+    // Assign sub-offsets within packed buffer
+    int32_t offset = 0;
+    for (int32_t i = 0; i < param_count; i++) {
+        if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
+            if (params[i].buffer->addr == 0) {
+                // New buffer: assign address within packed buffer
+                params[i].buffer->addr = (uint64_t)((char*)packed_base + offset);
+                offset += ALIGN_UP(params[i].buffer->size, PTO_ALIGNMENT);
             }
-        }
-    } else {
-        // Legacy: Allocate OUTPUT buffers individually
-        // Only allocate for truly new buffers (addr == 0).
-        for (int32_t i = 0; i < param_count; i++) {
-            if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
-                if (params[i].buffer->addr == 0) {
-                    // New buffer: allocate
-                    int32_t size = params[i].buffer->size;
-                    void* dev_ptr = host_api.device_malloc(size);
-                    params[i].buffer->addr = (uint64_t)dev_ptr;
-                }
-                // Update tensor descriptor with (possibly pre-existing) address
-                params[i].tensor.buffer.addr = params[i].buffer->addr;
-            }
+            // Update tensor descriptor with address
+            params[i].tensor.buffer.addr = params[i].buffer->addr;
         }
     }
 
@@ -458,10 +431,8 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
     tasks[task_id].packed_buffer_size = packed_buffer_size;
 
     // Update shared header with current task index
-    if (use_ring_allocation_) {
-        shared_header_.current_task_index = next_task_id;
-        shared_header_.heap_top = heap_ring_.top;
-    }
+    shared_header_.current_task_index = next_task_id;
+    shared_header_.heap_top = heap_ring_.top;
 
     // Tasks must be submitted inside a scope
     if (scope_stack_top_ <= 0) {

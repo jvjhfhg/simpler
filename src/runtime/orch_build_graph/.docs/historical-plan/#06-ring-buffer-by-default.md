@@ -1,5 +1,7 @@
 # `use_ring_allocation_` Removal And Ring Buffer By Default
 
+**Status: DONE**
+
 The main purpose is as the title.
 
 ## Current State Analysis

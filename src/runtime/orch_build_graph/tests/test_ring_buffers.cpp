@@ -374,57 +374,11 @@ static void test_mixed_allocation() {
 }
 
 // ============================================================================
-// Test 6: Backward compatibility - legacy allocation mode
-// ============================================================================
-
-static void test_legacy_mode() {
-    printf("\n=== Test 6: Legacy Allocation Mode (without pto_init_rings) ===\n");
-
-    Runtime runtime;
-    runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
-    runtime.pto_init();
-    // NOTE: NOT calling pto_init_rings() - legacy mode
-
-    int32_t BYTES = 64;
-
-    void* dev_a_ptr = mock_device_malloc(BYTES);
-    PTOBufferHandle dev_a = make_external_handle(dev_a_ptr, BYTES);
-    PTOBufferHandle dev_b = make_output_handle(BYTES);
-    PTOBufferHandle dev_c = make_output_handle(BYTES);
-
-    runtime.pto_scope_begin();
-
-    // T0: should use individual device_malloc per output
-    PTOParam params0[] = {
-        make_input_param(&dev_a, BYTES),
-        make_output_param(&dev_b, BYTES),
-        make_output_param(&dev_c, BYTES),
-        make_scalar_param(64),
-    };
-    int t0 = runtime.pto_submit_task(0, PTOWorkerType::VECTOR, params0, 4);
-
-    Task* task0 = runtime.get_task(t0);
-
-    // In legacy mode, packed_buffer_* should be 0
-    CHECK(task0->packed_buffer_offset == 0, "T0 packed_buffer_offset = 0 (legacy mode)");
-    CHECK(task0->packed_buffer_size == 0, "T0 packed_buffer_size = 0 (legacy mode)");
-
-    // But outputs should still be allocated
-    CHECK(dev_b.addr != 0, "dev_b allocated (legacy mode)");
-    CHECK(dev_c.addr != 0, "dev_c allocated (legacy mode)");
-
-    // In legacy mode, addresses are NOT guaranteed to be contiguous
-    // (each is a separate malloc)
-
-    runtime.pto_scope_end();
-}
-
-// ============================================================================
-// Test 7: Alignment verification
+// Test 6: Alignment verification
 // ============================================================================
 
 static void test_alignment() {
-    printf("\n=== Test 7: Alignment Verification ===\n");
+    printf("\n=== Test 6: Alignment Verification ===\n");
 
     Runtime runtime;
     runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
@@ -476,11 +430,11 @@ static void test_alignment() {
 }
 
 // ============================================================================
-// Test 8: Phase 1+2 compatibility - state machine still works with ring buffers
+// Test 7: Phase 1+2 compatibility - state machine still works with ring buffers
 // ============================================================================
 
 static void test_phase1_phase2_compatibility() {
-    printf("\n=== Test 8: Phase 1+2 Compatibility ===\n");
+    printf("\n=== Test 7: Phase 1+2 Compatibility ===\n");
 
     Runtime runtime;
     runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
@@ -563,7 +517,6 @@ int main() {
     test_multiple_tasks_heap();
     test_task_no_outputs();
     test_mixed_allocation();
-    test_legacy_mode();
     test_alignment();
     test_phase1_phase2_compatibility();
 
