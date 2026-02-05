@@ -150,6 +150,8 @@ struct TensorDescriptor {
 
     bool is_contiguous() const;
 
+    uint64_t numel() const;
+
     TensorDescriptor reshape(const std::vector<uint64_t>& shapes) const;
 
     TensorDescriptor transpose(uint64_t x, uint64_t y) const;

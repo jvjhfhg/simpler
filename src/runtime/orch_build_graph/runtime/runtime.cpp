@@ -354,6 +354,32 @@ void Runtime::pto_scope_end() {
 }
 
 int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOParam* params, int32_t param_count) {
+    // Validate allocation constraints for new buffers
+    for (int32_t i = 0; i < param_count; i++) {
+        if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
+            if (params[i].buffer->addr == 0) {
+                // New buffer needs allocation - validate constraints
+                const TensorDescriptor& tensor = params[i].tensor;
+
+                // Constraint 1: Tensor must be contiguous
+                if (!tensor.is_contiguous()) {
+                    printf("[PTO] ERROR: Cannot allocate non-contiguous tensor at param %d\n", i);
+                    printf("[PTO] Tensor details:\n%s", tensor.dump().c_str());
+                    always_assert(false && "Non-contiguous tensor requires allocation");
+                }
+
+                // Constraint 2: Tensor byte size must match buffer size
+                uint64_t tensor_bytes = tensor.numel() * get_element_size(tensor.dtype);
+                if (tensor_bytes != params[i].buffer->size) {
+                    printf("[PTO] ERROR: Tensor size mismatch at param %d\n", i);
+                    printf("[PTO] Tensor bytes: %lu, Buffer size: %d\n", tensor_bytes, params[i].buffer->size);
+                    printf("[PTO] Tensor details:\n%s", tensor.dump().c_str());
+                    always_assert(false && "Tensor size does not match buffer size");
+                }
+            }
+        }
+    }
+
     // Packed output buffer allocation using HeapRing
     // When ring allocation is enabled, allocate all outputs as a single packed buffer
     void* packed_base = nullptr;

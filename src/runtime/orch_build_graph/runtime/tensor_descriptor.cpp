@@ -329,6 +329,17 @@ bool TensorDescriptor::is_contiguous() const {
     return true;
 }
 
+uint64_t TensorDescriptor::numel() const {
+    if (ndims == 0) {
+        return 0;
+    }
+    uint64_t total = 1;
+    for (uint64_t i = 0; i < ndims; i++) {
+        total *= repeats[i];
+    }
+    return total;
+}
+
 TensorDescriptor TensorDescriptor::reshape(const std::vector<uint64_t>& shapes) const {
     debug_assert(valid_reshape(shapes));
 

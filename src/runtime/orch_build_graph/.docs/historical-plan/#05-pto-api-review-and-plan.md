@@ -6,7 +6,19 @@
 
 2. In `pto_submit_task`, it allocates for tensors without a specific address (not external and not a new version of existing tensors). It should be verified that tensors which are gonna be allocated need to be an entire tensor (contiguous contents and maybe other requirements).
 
-   > **Analysis (2026-02-05)**: Still a gap. Current code ([runtime.cpp:363-412](runtime/runtime.cpp#L363-L412)) allocates `buffer->size` bytes without validating tensor contiguity or other properties. No `is_contiguous()` check before allocation. **Status: Open.**
+   > **Analysis & Implementation (2026-02-05)**: **COMPLETED**.
+   >
+   > **Implementation Details**:
+   > - Added `numel()` method to `TensorDescriptor` to calculate total element count
+   > - Added validation in `pto_submit_task` ([runtime.cpp:363-388](runtime/runtime.cpp#L363-L388)) before allocation
+   > - Validates two constraints for tensors with `addr == 0`:
+   >   1. Contiguity: `tensor.is_contiguous()` must be true
+   >   2. Size match: `tensor.numel() * get_element_size(dtype)` must equal `buffer->size`
+   > - Asserts with detailed error messages on validation failure
+   > - All tests pass (307 runtime + 152 tensor descriptor tests)
+   > - Orchestration example runs successfully
+   >
+   > **Status: Closed.**
 
 3. To do tensor calculation, aicores may need the layout information of tensor which is involved in tensor metadata `TensorDescriptor`. But in the present implementation, tensor metadata is not passed into INCORE functions (or aicore kernels, can be seen at `examples/orch_build_graph_example/kernels/aiv`). It needs to be passed in.
 
@@ -118,14 +130,34 @@
 
 **Test Results**: All 459 tests pass (307 runtime + 152 tensor descriptor tests)
 
-### Phase 2: Validate allocation constraints (addresses #2)
+### Phase 2: Validate allocation constraints (addresses #2) - ✅ COMPLETED
 
-1. **Add `is_contiguous()` to `TensorDescriptor`**
-   - Check if strides match dense layout for given repeats
+**Implemented (2026-02-05)**:
 
-2. **Add validation in `pto_submit_task`**
-   - Before allocation, assert `tensor.is_contiguous()`
-   - Log warning or error if non-contiguous tensor needs allocation
+**Allocation Constraints**: When allocating a new buffer (addr == 0), the tensor must satisfy:
+1. **Contiguity**: `tensor.is_contiguous()` must return true (strides match dense layout)
+2. **Size Match**: Tensor memory usage must equal buffer size (`tensor.numel() * element_size(dtype) == buffer->size`)
+   - `numel()` = product of all `repeats[]` (number of elements)
+
+**Implementation Details**:
+
+1. **Added `numel()` method to `TensorDescriptor`** ([tensor_descriptor.h](runtime/tensor_descriptor.h), [tensor_descriptor.cpp](runtime/tensor_descriptor.cpp))
+   - Calculates number of elements: product of all repeats in used dimensions
+   - Returns `uint64_t` representing total element count
+   - Returns 0 for empty tensors (ndims == 0)
+
+2. **Added validation in `pto_submit_task`** ([runtime.cpp:363-388](runtime/runtime.cpp#L363-L388))
+   - Validates both constraints for OUTPUT params with `buffer->addr == 0`
+   - Check 1: `tensor.is_contiguous()` - ensures dense layout
+   - Check 2: `tensor.numel() * get_element_size(tensor.dtype) == buffer->size` - ensures size match
+   - Asserts with detailed error messages including tensor dump on validation failure
+
+**Test Results**:
+- All 307 runtime tests pass
+- All 152 tensor descriptor tests pass
+- Orchestration example runs successfully with validation enabled
+
+**Status: Closed.**
 
 ### Phase 3: Pass tensor metadata to kernels (addresses #3)
 
