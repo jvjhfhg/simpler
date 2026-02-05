@@ -56,6 +56,9 @@ extern "C" {
  * @param orch_func_name    Name of the orchestration function to call
  * @param func_args         Arguments for orchestration (host pointers, sizes, etc.)
  * @param func_args_count   Number of arguments
+ * @param arg_types         Array describing each argument's type (ignored for host orchestration)
+ * @param arg_sizes         Array of sizes for pointer arguments (ignored for host orchestration)
+ * @param orchestration_mode 0=host orchestration (default), 1=device orchestration
  * @return 0 on success, -1 on failure
  */
 int init_runtime_impl(Runtime *runtime,
@@ -63,7 +66,15 @@ int init_runtime_impl(Runtime *runtime,
                     size_t orch_so_size,
                     const char* orch_func_name,
                     uint64_t* func_args,
-                    int func_args_count) {
+                    int func_args_count,
+                    int* arg_types,
+                    uint64_t* arg_sizes,
+                    int orchestration_mode) {
+    // Unused parameters for host orchestration
+    (void)arg_types;
+    (void)arg_sizes;
+    (void)orchestration_mode;
+
     // Validate inputs
     if (runtime == nullptr) {
         std::cerr << "Error: Runtime pointer is null\n";

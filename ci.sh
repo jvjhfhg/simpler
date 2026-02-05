@@ -27,7 +27,7 @@ else
     python examples/scripts/run_example.py \
         -k examples/host_build_graph_example/kernels \
         -g examples/host_build_graph_example/golden.py \
-        -p a2a3
+        -p a2a3 -d 6
     python examples/scripts/run_example.py \
         -k examples/host_build_graph_example/kernels \
         -g examples/host_build_graph_example/golden.py \
@@ -35,7 +35,7 @@ else
     python examples/scripts/run_example.py \
         -k examples/matmul_example/kernels \
         -g examples/matmul_example/golden.py \
-        -p a2a3
+        -p a2a3 -d 6
     python examples/scripts/run_example.py \
         -k examples/matmul_example/kernels \
         -g examples/matmul_example/golden.py \

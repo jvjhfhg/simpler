@@ -155,10 +155,12 @@ int DeviceRunner::run(Runtime& runtime,
         return -1;
     }
 
-    // Validate even distribution: block_dim must be divisible by launch_aicpu_num
-    if (block_dim % launch_aicpu_num != 0) {
+    // Validate even distribution: block_dim must be divisible by scheduler thread count
+    // When launch_aicpu_num == 4: 3 schedulers + 1 orchestrator (thread 3 has 0 cores)
+    int scheduler_thread_num = (launch_aicpu_num == 4) ? 3 : launch_aicpu_num;
+    if (block_dim % scheduler_thread_num != 0) {
         std::cerr << "Error: block_dim (" << block_dim
-                  << ") must be evenly divisible by launch_aicpu_num (" << launch_aicpu_num << ")\n";
+                  << ") must be evenly divisible by scheduler_thread_num (" << scheduler_thread_num << ")\n";
         return -1;
     }
 
@@ -197,15 +199,16 @@ int DeviceRunner::run(Runtime& runtime,
         runtime.workers[i].core_type = (i < num_aic) ? CoreType::AIC : CoreType::AIV;
     }
 
-    // Set function_bin_addr for all tasks
+    // Set function_bin_addr for each task from Runtime's func_id_to_addr_[] array
+    // (addresses were stored there during init_runtime via upload_kernel_binary)
     std::cout << "\n=== Setting function_bin_addr for Tasks (Simulation) ===" << '\n';
     for (int i = 0; i < runtime.get_task_count(); i++) {
         Task* task = runtime.get_task(i);
         if (task != nullptr) {
-            uint64_t addr = get_function_bin_addr(task->func_id);
+            uint64_t addr = runtime.get_function_bin_addr(task->func_id);
             task->function_bin_addr = addr;
-            std::cout << "  Task " << i << " (func_id=" << task->func_id
-                      << ") -> function_bin_addr=0x" << std::hex << addr << std::dec << '\n';
+            std::cout << "  Task " << i << " (func_id=" << task->func_id << ") -> function_bin_addr=0x" << std::hex
+                      << addr << std::dec << '\n';
         }
     }
     std::cout << '\n';
@@ -320,19 +323,20 @@ int DeviceRunner::finalize() {
 }
 
 // =============================================================================
-// Kernel Registration (Executable Memory Mapping)
+// Kernel Binary Upload (returns function address for caller to store in Runtime)
 // =============================================================================
 
-int DeviceRunner::register_kernel(int func_id, const uint8_t* bin_data, size_t bin_size) {
+uint64_t DeviceRunner::upload_kernel_binary(int func_id, const uint8_t* bin_data, size_t bin_size) {
     if (bin_data == nullptr || bin_size == 0) {
         std::cerr << "Error: Invalid kernel data\n";
-        return -1;
+        return 0;
     }
 
-    // Skip if already registered
-    if (func_id_to_addr_.find(func_id) != func_id_to_addr_.end()) {
-        std::cout << "Kernel func_id=" << func_id << " already registered, skipping\n";
-        return 0;
+    // Return cached address if already uploaded
+    auto it = func_id_to_addr_.find(func_id);
+    if (it != func_id_to_addr_.end()) {
+        std::cout << "Kernel func_id=" << func_id << " already uploaded, returning cached address\n";
+        return it->second.func_addr;
     }
 
     // 1. Generate temp file path
@@ -343,13 +347,12 @@ int DeviceRunner::register_kernel(int func_id, const uint8_t* bin_data, size_t b
     std::ofstream ofs(tmpfile, std::ios::binary);
     if (!ofs) {
         std::cerr << "Error: Failed to create temp file: " << tmpfile << '\n';
-        return -1;
+        return 0;
     }
     ofs.write(reinterpret_cast<const char*>(bin_data), bin_size);
     ofs.close();
 
-    std::cout << "Wrote kernel .so to temp file: " << tmpfile
-              << " (size=" << bin_size << " bytes)\n";
+    std::cout << "Uploading kernel .so: " << tmpfile << " (size=" << bin_size << " bytes)\n";
 
     // 3. dlopen to load .so (RTLD_NOW ensures all symbols resolved immediately)
     void* handle = dlopen(tmpfile, RTLD_NOW | RTLD_LOCAL);
@@ -359,7 +362,7 @@ int DeviceRunner::register_kernel(int func_id, const uint8_t* bin_data, size_t b
 
     if (!handle) {
         std::cerr << "Error: dlopen failed: " << dlerror() << '\n';
-        return -1;
+        return 0;
     }
 
     // 5. dlsym to get kernel function address (unified entry point: "kernel_entry")
@@ -367,28 +370,18 @@ int DeviceRunner::register_kernel(int func_id, const uint8_t* bin_data, size_t b
     if (!func) {
         std::cerr << "Error: dlsym failed for 'kernel_entry': " << dlerror() << '\n';
         dlclose(handle);
-        return -1;
+        return 0;
     }
 
-    // 6. Store mapping info
+    // 6. Store mapping info for cleanup
     MappedKernel kernel;
     kernel.dl_handle = handle;
     kernel.func_addr = reinterpret_cast<uint64_t>(func);
 
     func_id_to_addr_[func_id] = kernel;
 
-    std::cout << "Registered kernel (dlopen): func_id=" << func_id
-              << " -> addr=0x" << std::hex << kernel.func_addr << std::dec
+    std::cout << "  func_id=" << func_id << " -> addr=0x" << std::hex << kernel.func_addr << std::dec
               << ", handle=" << handle << '\n';
 
-    return 0;
-}
-
-uint64_t DeviceRunner::get_function_bin_addr(int func_id) {
-    auto it = func_id_to_addr_.find(func_id);
-    if (it == func_id_to_addr_.end()) {
-        std::cerr << "Warning: function_bin_addr not found for func_id=" << func_id << '\n';
-        return 0;
-    }
-    return it->second.func_addr;
+    return kernel.func_addr;
 }
