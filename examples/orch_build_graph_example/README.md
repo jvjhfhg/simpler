@@ -82,19 +82,26 @@ This example currently supports only the simulation platform:
 
 ```bash
 # From repository root
+# Add `-v` for verbose output
 python examples/scripts/run_example.py \
   -k examples/orch_build_graph_example/kernels \
   -g examples/orch_build_graph_example/golden.py \
   -p a2a3sim \
-  -r orch_build_graph
+  -r orch_build_graph [-v]
+```
 
-# With verbose output
+### Run on Ascend NPU
+
+```bash
+# From repository root
+# Replace `$device_id` with real ascend device id
+# Add `-v` for verbose output
 python examples/scripts/run_example.py \
   -k examples/orch_build_graph_example/kernels \
   -g examples/orch_build_graph_example/golden.py \
-  -p a2a3sim \
+  -p a2a3 \
   -r orch_build_graph \
-  -v
+  -d $device_id [-v]
 ```
 
 ## Directory Structure
