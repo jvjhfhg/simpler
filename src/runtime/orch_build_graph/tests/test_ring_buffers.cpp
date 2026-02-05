@@ -65,13 +65,14 @@ static void cleanup_allocations() {
 // Helpers
 // ============================================================================
 
-static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size, int32_t version = 0) {
     TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
     t.repeats[0] = size;
     t.ndims = 1;
+    t.version = version;
     t.overlap_type = OverlapType::Fuzzy;
     return t;
 }
@@ -106,7 +107,6 @@ static PTOBufferHandle make_external_handle(void* addr, int32_t size) {
     PTOBufferHandle h = {};
     h.addr = (uint64_t)addr;
     h.size = size;
-    h.version = 0;
     return h;
 }
 
@@ -114,7 +114,6 @@ static PTOBufferHandle make_output_handle(int32_t size) {
     PTOBufferHandle h = {};
     h.addr = 0;
     h.size = size;
-    h.version = 0;
     return h;
 }
 
@@ -331,70 +330,11 @@ static void test_task_no_outputs() {
 }
 
 // ============================================================================
-// Test 5: Pre-allocated output (version_inc) doesn't allocate again
-// ============================================================================
-
-static void test_preallocated_output() {
-    printf("\n=== Test 5: Pre-allocated Output (version_inc) ===\n");
-
-    Runtime runtime;
-    runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
-    runtime.pto_init();
-    runtime.pto_init_rings();
-
-    int32_t BYTES = 64;
-    int32_t aligned_size = ALIGN_UP(BYTES, PTO_ALIGNMENT);
-
-    void* dev_a_ptr = mock_device_malloc(BYTES);
-    PTOBufferHandle dev_a = make_external_handle(dev_a_ptr, BYTES);
-    PTOBufferHandle dev_b = make_output_handle(BYTES);
-
-    runtime.pto_scope_begin();
-
-    // T0: allocates dev_b
-    PTOParam params0[] = {
-        make_input_param(&dev_a, BYTES),
-        make_output_param(&dev_b, BYTES),
-        make_scalar_param(64),
-    };
-    int t0 = runtime.pto_submit_task(0, PTOWorkerType::VECTOR, params0, 3);
-
-    Task* task0 = runtime.get_task(t0);
-    CHECK(task0->packed_buffer_size == aligned_size, "T0 allocated 1 buffer");
-
-    uint64_t original_addr = dev_b.addr;
-    CHECK(original_addr != 0, "dev_b has address");
-
-    // version_inc creates new versioned handle with same address
-    PTOBufferHandle* dev_b_v1 = runtime.pto_version_inc(&dev_b);
-    CHECK(dev_b_v1 != nullptr, "version_inc returned handle");
-    CHECK(dev_b_v1->addr == original_addr, "Versioned handle has same address");
-    CHECK(dev_b_v1->version == 1, "Versioned handle has version 1");
-
-    // T1: uses pre-allocated dev_b_v1, should NOT allocate again
-    PTOParam params1[] = {
-        make_input_param(&dev_a, BYTES),
-        make_output_param(dev_b_v1, BYTES),
-        make_scalar_param(64),
-    };
-    int t1 = runtime.pto_submit_task(1, PTOWorkerType::VECTOR, params1, 3);
-
-    Task* task1 = runtime.get_task(t1);
-    CHECK(task1->packed_buffer_size == 0, "T1 did not allocate (pre-allocated handle)");
-    CHECK(dev_b_v1->addr == original_addr, "Address unchanged after T1");
-
-    PTOSharedHeader* header = runtime.get_shared_header();
-    CHECK(header->heap_top == aligned_size, "heap_top unchanged (no new allocation)");
-
-    runtime.pto_scope_end();
-}
-
-// ============================================================================
-// Test 6: Mixed allocation - some pre-allocated, some new
+// Test 5: Mixed allocation - some pre-allocated, some new
 // ============================================================================
 
 static void test_mixed_allocation() {
-    printf("\n=== Test 6: Mixed Allocation ===\n");
+    printf("\n=== Test 5: Mixed Allocation ===\n");
 
     Runtime runtime;
     runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
@@ -432,11 +372,11 @@ static void test_mixed_allocation() {
 }
 
 // ============================================================================
-// Test 7: Backward compatibility - legacy allocation mode
+// Test 6: Backward compatibility - legacy allocation mode
 // ============================================================================
 
 static void test_legacy_mode() {
-    printf("\n=== Test 7: Legacy Allocation Mode (without pto_init_rings) ===\n");
+    printf("\n=== Test 6: Legacy Allocation Mode (without pto_init_rings) ===\n");
 
     Runtime runtime;
     runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
@@ -478,11 +418,11 @@ static void test_legacy_mode() {
 }
 
 // ============================================================================
-// Test 8: Alignment verification
+// Test 7: Alignment verification
 // ============================================================================
 
 static void test_alignment() {
-    printf("\n=== Test 8: Alignment Verification ===\n");
+    printf("\n=== Test 7: Alignment Verification ===\n");
 
     Runtime runtime;
     runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
@@ -534,11 +474,11 @@ static void test_alignment() {
 }
 
 // ============================================================================
-// Test 9: Phase 1+2 compatibility - state machine still works with ring buffers
+// Test 8: Phase 1+2 compatibility - state machine still works with ring buffers
 // ============================================================================
 
 static void test_phase1_phase2_compatibility() {
-    printf("\n=== Test 9: Phase 1+2 Compatibility ===\n");
+    printf("\n=== Test 8: Phase 1+2 Compatibility ===\n");
 
     Runtime runtime;
     runtime.host_api = {mock_device_malloc, mock_device_free, mock_copy_to_device, mock_copy_from_device};
@@ -620,7 +560,6 @@ int main() {
     test_single_task_packed_output();
     test_multiple_tasks_heap();
     test_task_no_outputs();
-    test_preallocated_output();
     test_mixed_allocation();
     test_legacy_mode();
     test_alignment();

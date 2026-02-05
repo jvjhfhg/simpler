@@ -7,7 +7,7 @@
  *    f = (a + b + 1) * (a + b + 2)
  *    Tests: Basic DAG, intermediate buffers, parallel branches
  *
- * 2. In-Place Updates (via pto_version_inc):
+ * 2. In-Place Updates (via TensorDescriptor::version):
  *    g = (((a + 1) + 1) + 1) + 1 = a + 4
  *    Tests: SSA-style versioning, dependency tracking across versions
  *
@@ -23,6 +23,7 @@
  * Design principles applied:
  * - Memory allocation is implicit during pto_submit_task() for OUTPUT params
  * - Scope-based buffer lifetime (pto_scope_begin/pto_scope_end)
+ * - Version tracking via TensorDescriptor::version for in-place updates
  * - No explicit pto_alloc/pto_free
  * - Buffer lifetime = producer task lifetime (no separate buffer ref count)
  */
@@ -32,8 +33,8 @@
 #include "runtime.h"
 
 // Helper: create a BoundingBox tensor descriptor
-static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
-    TensorDescriptor t(addr, size, 0, {1}, {static_cast<uint64_t>(size)}, 1, 0);
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size, int32_t version = 0) {
+    TensorDescriptor t(addr, size, 0, {1}, {static_cast<uint64_t>(size)}, 1, version);
     return t;
 }
 
@@ -47,20 +48,20 @@ static PTOParam make_scalar_param(uint64_t value) {
 }
 
 // Helper: create an input PTOParam from an existing buffer handle
-static PTOParam make_input_param(PTOBufferHandle* buf, int32_t size) {
+static PTOParam make_input_param(PTOBufferHandle* buf, int32_t size, int32_t version = 0) {
     PTOParam p = {};
     p.type = PTOParamType::INPUT;
-    p.tensor = make_tensor_bbox(buf->addr, size);
+    p.tensor = make_tensor_bbox(buf->addr, size, version);
     p.buffer = buf;
     p.scalar_value = 0;
     return p;
 }
 
 // Helper: create an output PTOParam (addr will be filled by pto_submit_task)
-static PTOParam make_output_param(PTOBufferHandle* buf, int32_t size) {
+static PTOParam make_output_param(PTOBufferHandle* buf, int32_t size, int32_t version = 0) {
     PTOParam p = {};
     p.type = PTOParamType::OUTPUT;
-    p.tensor = make_tensor_bbox(0, size);  // addr=0, filled during submit
+    p.tensor = make_tensor_bbox(0, size, version);  // addr=0, filled during submit
     p.buffer = buf;
     p.scalar_value = 0;
     return p;
@@ -82,7 +83,6 @@ static PTOBufferHandle make_external_handle(void* addr, int32_t size) {
     PTOBufferHandle h = {};
     h.addr = (uint64_t)addr;
     h.size = size;
-    h.version = 0;
     return h;
 }
 
@@ -91,7 +91,6 @@ static PTOBufferHandle make_output_handle(int32_t size) {
     PTOBufferHandle h = {};
     h.addr = 0;  // Will be allocated by runtime during pto_submit_task
     h.size = size;
-    h.version = 0;
     return h;
 }
 
@@ -221,35 +220,35 @@ int build_orch_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     PTOParam params4[] = {
         make_input_param(&dev_a, BYTES),
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(&dev_x_v0, BYTES),
+        make_output_param(&dev_x_v0, BYTES, 0),  // version 0
         make_scalar_param((uint64_t)SIZE),
     };
     int t4 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params4, 4);  // kernel_add_scalar
     std::cout << "Task " << t4 << ": x_v0 = a + 1\n";
 
-    // Create version 1 of x for in-place update
-    PTOBufferHandle* dev_x_v1 = runtime->pto_version_inc(&dev_x_v0);
-    std::cout << "Created x_v1 via pto_version_inc() (version=" << dev_x_v1->version << ")\n";
+    // Create version 1 handle (same address, managed via TensorDescriptor::version)
+    PTOBufferHandle dev_x_v1 = dev_x_v0;  // Same buffer, version tracked in TensorDescriptor
+    std::cout << "Created x_v1 (version=1, same buffer as x_v0)\n";
 
     // Task 5: x_v1 = x_v0 + 1 (in-place update)
     PTOParam params5[] = {
-        make_input_param(&dev_x_v0, BYTES),
+        make_input_param(&dev_x_v0, BYTES, 0),   // Read from version 0
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(dev_x_v1, BYTES),
+        make_output_param(&dev_x_v1, BYTES, 1),  // Write to version 1
         make_scalar_param((uint64_t)SIZE),
     };
     int t5 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params5, 4);
     std::cout << "Task " << t5 << ": x_v1 = x_v0 + 1 (in-place)\n";
 
-    // Create version 2 of x
-    PTOBufferHandle* dev_x_v2 = runtime->pto_version_inc(dev_x_v1);
-    std::cout << "Created x_v2 via pto_version_inc() (version=" << dev_x_v2->version << ")\n";
+    // Create version 2 handle
+    PTOBufferHandle dev_x_v2 = dev_x_v1;  // Same buffer, version tracked in TensorDescriptor
+    std::cout << "Created x_v2 (version=2, same buffer as x_v1)\n";
 
     // Task 6: x_v2 = x_v1 + 1 (in-place update)
     PTOParam params6[] = {
-        make_input_param(dev_x_v1, BYTES),
+        make_input_param(&dev_x_v1, BYTES, 1),   // Read from version 1
         make_scalar_param(float_to_u64(1.0f)),
-        make_output_param(dev_x_v2, BYTES),
+        make_output_param(&dev_x_v2, BYTES, 2),  // Write to version 2
         make_scalar_param((uint64_t)SIZE),
     };
     int t6 = runtime->pto_submit_task(1, PTOWorkerType::VECTOR, params6, 4);
@@ -257,7 +256,7 @@ int build_orch_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
 
     // Task 7: g = x_v2 + 1 (final result for test 2)
     PTOParam params7[] = {
-        make_input_param(dev_x_v2, BYTES),
+        make_input_param(&dev_x_v2, BYTES, 2),   // Read from version 2
         make_scalar_param(float_to_u64(1.0f)),
         make_output_param(&dev_g, BYTES),
         make_scalar_param((uint64_t)SIZE),

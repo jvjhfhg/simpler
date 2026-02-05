@@ -62,13 +62,14 @@ static void cleanup_allocations() {
 // Helpers
 // ============================================================================
 
-static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size) {
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size, int32_t version = 0) {
     TensorDescriptor t = {};
     t.addr = addr;
     t.start_offset = 0;
     t.strides[0] = 1;
     t.repeats[0] = size;
     t.ndims = 1;
+    t.version = version;
     t.overlap_type = OverlapType::Fuzzy;
     return t;
 }
@@ -103,7 +104,6 @@ static PTOBufferHandle make_external_handle(void* addr, int32_t size) {
     PTOBufferHandle h = {};
     h.addr = (uint64_t)addr;
     h.size = size;
-    h.version = 0;
     return h;
 }
 
@@ -111,7 +111,6 @@ static PTOBufferHandle make_output_handle(int32_t size) {
     PTOBufferHandle h = {};
     h.addr = 0;
     h.size = size;
-    h.version = 0;
     return h;
 }
 

@@ -4,7 +4,7 @@
  * This provides a Runtime class compatible with the existing platform layer,
  * allowing the orchestration runtime to work with the same infrastructure as host_build_graph.
  *
- * PTO API: pto_scope_begin(), pto_scope_end(), pto_submit_task(), pto_version_inc()
+ * PTO API: pto_scope_begin(), pto_scope_end(), pto_submit_task()
  * Dependencies are detected automatically via TensorMap.
  * Memory allocation is implicit during pto_submit_task() for OUTPUT params.
  *
@@ -144,11 +144,6 @@ public:
     // Scope controls buffer lifetime (fanout initialized to scope_depth)
     void pto_scope_begin();
     void pto_scope_end();
-
-    // --- Version Control for In-Place Updates ---
-    // Returns new versioned handle (SSA-style)
-    // Write to version v waits for all reads from version v-1
-    PTOBufferHandle* pto_version_inc(PTOBufferHandle* handle);
 
     // --- Task Submission ---
     // Submit task with automatic dependency detection via TensorMap

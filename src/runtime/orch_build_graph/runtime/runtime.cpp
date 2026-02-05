@@ -353,25 +353,6 @@ void Runtime::pto_scope_end() {
     scope_tasks_top_ = tasks_begin;
 }
 
-PTOBufferHandle* Runtime::pto_version_inc(PTOBufferHandle* handle) {
-    if (handle == nullptr) return nullptr;
-
-    // Create a new versioned handle (SSA-style)
-    // Same address, incremented version number
-    if (buffer_handle_count_ >= PTO_TENSORMAP_POOL_SIZE) {
-        fprintf(stderr, "[PTO] ERROR: Buffer handle pool full for version_inc\n");
-        return nullptr;
-    }
-
-    PTOBufferHandle* new_handle = &buffer_handles_[buffer_handle_count_++];
-    new_handle->addr = handle->addr;
-    new_handle->size = handle->size;
-    new_handle->version = handle->version + 1;
-    // Note: no ref_count - buffer lifetime tied to task lifetime
-
-    return new_handle;
-}
-
 int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOParam* params, int32_t param_count) {
     // Packed output buffer allocation using HeapRing
     // When ring allocation is enabled, allocate all outputs as a single packed buffer
@@ -407,7 +388,6 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
                 if (params[i].buffer->addr == 0) {
                     // New buffer: assign address within packed buffer
                     params[i].buffer->addr = (uint64_t)((char*)packed_base + offset);
-                    params[i].buffer->version = 0;
                     offset += ALIGN_UP(params[i].buffer->size, PTO_ALIGNMENT);
                 }
                 // Update tensor descriptor with address
@@ -417,15 +397,13 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
     } else {
         // Legacy: Allocate OUTPUT buffers individually
         // Only allocate for truly new buffers (addr == 0).
-        // Versioned handles from pto_version_inc already have addr set.
         for (int32_t i = 0; i < param_count; i++) {
             if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
                 if (params[i].buffer->addr == 0) {
-                    // New buffer: allocate and set version to 0
+                    // New buffer: allocate
                     int32_t size = params[i].buffer->size;
                     void* dev_ptr = host_api.device_malloc(size);
                     params[i].buffer->addr = (uint64_t)dev_ptr;
-                    params[i].buffer->version = 0;
                 }
                 // Update tensor descriptor with (possibly pre-existing) address
                 params[i].tensor.addr = params[i].buffer->addr;
@@ -493,7 +471,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
     // Register OUTPUT tensors in TensorMap
     for (int32_t i = 0; i < param_count; i++) {
         if (params[i].type == PTOParamType::OUTPUT && params[i].buffer != nullptr) {
-            tensormap_insert(&tensor_map_, &params[i].tensor, task_id, params[i].buffer->version);
+            tensormap_insert(&tensor_map_, &params[i].tensor, task_id, params[i].tensor.version);
         }
     }
 

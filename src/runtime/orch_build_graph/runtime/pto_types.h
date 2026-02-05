@@ -63,11 +63,10 @@ constexpr int32_t PTO_NUM_WORKER_TYPES = 2;
 // =============================================================================
 
 /**
- * Buffer Handle for version tracking
+ * Buffer Handle
  *
- * Supports versioning for in-place updates (SSA-style):
- * - Write to version v waits for all reads from version v-1
- * - Read from version v waits for writes to version v to complete
+ * Represents a device memory buffer. Version tracking is managed via
+ * TensorDescriptor::version for dependency detection.
  *
  * Buffer lifetime is tied to producer task lifetime (no separate ref count).
  * Allocation is implicit during pto_submit_task() for OUTPUT params.
@@ -75,10 +74,8 @@ constexpr int32_t PTO_NUM_WORKER_TYPES = 2;
  * See: divergence-to-original-orchestration.md §5, §6
  */
 struct PTOBufferHandle {
-    uint64_t addr;    // Device memory address
-    int32_t size;     // Buffer size in bytes
-    int32_t version;  // Version number (for in-place updates)
-    // Note: ref_count removed - buffer lifetime = task lifetime
+    uint64_t addr;  // Device memory address
+    int32_t size;   // Buffer size in bytes
 };
 
 // =============================================================================

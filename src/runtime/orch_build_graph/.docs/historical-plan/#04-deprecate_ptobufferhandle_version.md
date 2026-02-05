@@ -1,7 +1,7 @@
 # Plan: Deprecate PTOBufferHandle::version
 
-**Status**: Ready to implement
-**Date**: 2026-02-04
+**Status**: ✅ Completed
+**Date**: 2026-02-05
 **Context**: Version tracking has been migrated from PTOBufferHandle to TensorDescriptor
 
 ## Background
@@ -14,50 +14,92 @@ Version tracking has been migrated from `PTOBufferHandle` to `TensorDescriptor`.
 
 Since the dependency buildup logic is fully implemented using `TensorDescriptor::version` inside the overlap check, `PTOBufferHandle::version` and `pto_version_inc()` serve no purpose and can be removed directly.
 
-## Changes Required
+## Changes Completed
 
-### 1. Remove version field from PTOBufferHandle
+### 1. ✅ Removed version field from PTOBufferHandle
 
-**File**: `src/runtime/orch_build_graph/runtime/pto_types.h`
+**File**: [src/runtime/orch_build_graph/runtime/pto_types.h](src/runtime/orch_build_graph/runtime/pto_types.h)
 
-```cpp
-// Before
-struct PTOBufferHandle {
-    uint64_t addr;
-    int32_t size;
-    int32_t version;  // For in-place updates
-};
+Removed `int32_t version` field from `PTOBufferHandle` struct.
 
-// After
-struct PTOBufferHandle {
-    uint64_t addr;
-    int32_t size;
-};
-```
-
-### 2. Remove pto_version_inc() function
+### 2. ✅ Removed pto_version_inc() function
 
 **Files**:
-- `src/runtime/orch_build_graph/runtime/pto_runtime.h` - Remove declaration
-- `src/runtime/orch_build_graph/runtime/runtime.cpp` - Remove implementation
+- [src/runtime/orch_build_graph/runtime/runtime.h](src/runtime/orch_build_graph/runtime/runtime.h) - Removed declaration
+- [src/runtime/orch_build_graph/runtime/runtime.cpp](src/runtime/orch_build_graph/runtime/runtime.cpp) - Removed implementation
 
-### 3. Remove version initialization in runtime
+### 3. ✅ Removed version initialization in runtime
 
-**File**: `src/runtime/orch_build_graph/runtime/runtime.cpp`
+**File**: [src/runtime/orch_build_graph/runtime/runtime.cpp](src/runtime/orch_build_graph/runtime/runtime.cpp)
 
-Remove lines that initialize `params[i].buffer->version = 0` for OUTPUT buffers.
+Removed lines that initialized `params[i].buffer->version = 0` for OUTPUT buffers.
 
-### 4. Update tensormap_insert() call
+### 4. ✅ Updated tensormap_insert() call
 
-**File**: `src/runtime/orch_build_graph/runtime/runtime.cpp`
+**File**: [src/runtime/orch_build_graph/runtime/runtime.cpp:474](src/runtime/orch_build_graph/runtime/runtime.cpp#L474)
 
-Already uses `params[i].tensor.version` - verify this is correct.
+Changed from `params[i].buffer->version` to `params[i].tensor.version`.
 
-### 5. Update test code
+### 5. ✅ Updated test code
 
-Remove any tests that specifically test `pto_version_inc()` or `PTOBufferHandle::version`.
+Removed `test_preallocated_output()` test that specifically tested `pto_version_inc()`.
+
+Updated all test helper functions to:
+- Remove `h.version = 0` initialization in `make_external_handle()` and `make_output_handle()`
+- Add `version` parameter to `make_tensor_bbox()` with default value of 0
+
+**Files updated**:
+- [test_ring_buffers.cpp](src/runtime/orch_build_graph/tests/test_ring_buffers.cpp)
+- [test_state_machine.cpp](src/runtime/orch_build_graph/tests/test_state_machine.cpp)
+- [test_scope_end.cpp](src/runtime/orch_build_graph/tests/test_scope_end.cpp)
+- [test_shared_header.cpp](src/runtime/orch_build_graph/tests/test_shared_header.cpp)
+- [test_dep_list_pool.cpp](src/runtime/orch_build_graph/tests/test_dep_list_pool.cpp)
 
 ## Verification
 
-1. Build and run all tests
-2. Verify dependency tracking still works via `TensorDescriptor::version` in overlap detection
+✅ All tests pass:
+- test_state_machine: 52 passed
+- test_scope_end: 102 passed
+- test_ring_buffers: 50 passed
+- test_shared_header: 57 passed
+- test_dep_list_pool: 46 passed
+
+**Total: 307 tests passed, 0 failed**
+
+Dependency tracking via `TensorDescriptor::version` in overlap detection works correctly.
+
+## How TensorDescriptor::version Affects Dependency Buildup
+
+Version tracking enables SSA-style in-place updates with automatic dependency detection:
+
+**Overlap Detection Logic** ([tensor_descriptor.cpp:396-405](src/runtime/orch_build_graph/runtime/tensor_descriptor.cpp#L396-L405)):
+```cpp
+bool TensorDescriptor::is_overlap(const TensorDescriptor& pre_task_output) const {
+    if (!is_same_memref(pre_task_output)) {
+        return false;  // Different buffers, no overlap
+    }
+    debug_assert(version >= pre_task_output.version);
+    if (version > pre_task_output.version) {
+        return true;   // Same buffer, different version → BARRIER (always dependency)
+    }
+    // Same version: check spatial overlap...
+}
+```
+
+**Key Behavior**:
+- **Different versions** (`input.version > output.version`): **BARRIER** - always creates dependency regardless of spatial overlap, enabling in-place updates
+- **Same version**: Checks spatial overlap (bounding box intersection) to determine dependency
+- **Assertion**: Input version must be ≥ output version (enforces SSA ordering)
+
+**Example** (from orch_example_orch.cpp):
+```cpp
+// Task 4: x_v0 = a + 1 (version=0)
+make_output_param(&dev_x_v0, BYTES, 0);
+
+// Task 5: x_v1 = x_v0 + 1 (read v0, write v1)
+make_input_param(&dev_x_v0, BYTES, 0);   // Read from version 0
+make_output_param(&dev_x_v1, BYTES, 1);  // Write to version 1
+// → BARRIER: Task 5 always waits for Task 4 (version 1 > version 0)
+```
+
+This replaces the old `pto_version_inc()` API with explicit version management in TensorDescriptor.
