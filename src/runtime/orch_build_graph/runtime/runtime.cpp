@@ -391,7 +391,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
                     offset += ALIGN_UP(params[i].buffer->size, PTO_ALIGNMENT);
                 }
                 // Update tensor descriptor with address
-                params[i].tensor.addr = params[i].buffer->addr;
+                params[i].tensor.buffer.addr = params[i].buffer->addr;
             }
         }
     } else {
@@ -406,7 +406,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
                     params[i].buffer->addr = (uint64_t)dev_ptr;
                 }
                 // Update tensor descriptor with (possibly pre-existing) address
-                params[i].tensor.addr = params[i].buffer->addr;
+                params[i].tensor.buffer.addr = params[i].buffer->addr;
             }
         }
     }

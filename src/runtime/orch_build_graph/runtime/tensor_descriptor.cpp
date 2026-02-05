@@ -48,14 +48,15 @@ void TensorDescriptor::ContiguousMemSegIterator::operator++() {
 
 // TensorDescriptor constructors
 TensorDescriptor::TensorDescriptor(uint64_t addr,
-    uint64_t size,
+    int32_t buffer_size_bytes,
     uint64_t start_offset,
     uint64_t strides[],
     uint64_t repeats[],
     uint64_t ndims,
+    DataType dtype,
     int32_t version,
     OverlapType overlap_type)
-    : addr(addr), size(size), start_offset(start_offset), ndims(ndims), version(version), overlap_type(overlap_type) {
+    : buffer{addr, buffer_size_bytes}, start_offset(start_offset), ndims(ndims), dtype(dtype), version(version), overlap_type(overlap_type) {
     for (uint64_t i = 0; i < ndims; i++) {
         this->strides[i] = strides[i];
         this->repeats[i] = repeats[i];
@@ -64,14 +65,15 @@ TensorDescriptor::TensorDescriptor(uint64_t addr,
 }
 
 TensorDescriptor::TensorDescriptor(uint64_t addr,
-    uint64_t size,
+    int32_t buffer_size_bytes,
     uint64_t start_offset,
     const std::vector<uint64_t>& strides,
     const std::vector<uint64_t>& repeats,
     uint64_t ndims,
+    DataType dtype,
     int32_t version,
     OverlapType overlap_type)
-    : addr(addr), size(size), start_offset(start_offset), ndims(ndims), version(version), overlap_type(overlap_type) {
+    : buffer{addr, buffer_size_bytes}, start_offset(start_offset), ndims(ndims), dtype(dtype), version(version), overlap_type(overlap_type) {
     for (uint64_t i = 0; i < ndims; i++) {
         this->strides[i] = strides[i];
         this->repeats[i] = repeats[i];
@@ -80,10 +82,10 @@ TensorDescriptor::TensorDescriptor(uint64_t addr,
 }
 
 TensorDescriptor::TensorDescriptor(TensorDescriptor&& other)
-    : addr(other.addr),
-      size(other.size),
+    : buffer(other.buffer),
       start_offset(other.start_offset),
       ndims(other.ndims),
+      dtype(other.dtype),
       version(other.version),
       overlap_type(other.overlap_type) {
     for (uint64_t i = 0; i < ndims; i++) {
@@ -93,10 +95,10 @@ TensorDescriptor::TensorDescriptor(TensorDescriptor&& other)
 }
 
 TensorDescriptor::TensorDescriptor(const TensorDescriptor& other)
-    : addr(other.addr),
-      size(other.size),
+    : buffer(other.buffer),
       start_offset(other.start_offset),
       ndims(other.ndims),
+      dtype(other.dtype),
       version(other.version),
       overlap_type(other.overlap_type) {
     for (uint64_t i = 0; i < ndims; i++) {
@@ -106,10 +108,10 @@ TensorDescriptor::TensorDescriptor(const TensorDescriptor& other)
 }
 
 TensorDescriptor& TensorDescriptor::operator=(const TensorDescriptor& other) {
-    addr = other.addr;
-    size = other.size;
+    buffer = other.buffer;
     start_offset = other.start_offset;
     ndims = other.ndims;
+    dtype = other.dtype;
     version = other.version;
     overlap_type = other.overlap_type;
     for (uint64_t i = 0; i < ndims; i++) {
@@ -123,9 +125,10 @@ std::string TensorDescriptor::dump() const {
     std::stringstream ss;
     std::string indent = "    ";
     ss << "{" << std::endl;
-    ss << indent << "addr: " << addr << std::endl;
-    ss << indent << "size: " << size << std::endl;
-    ss << indent << "start_offset: " << start_offset << std::endl;
+    ss << indent << "buffer.addr: " << buffer.addr << std::endl;
+    ss << indent << "buffer.size: " << buffer.size << " bytes" << std::endl;
+    ss << indent << "dtype: " << get_dtype_name(dtype) << std::endl;
+    ss << indent << "start_offset: " << start_offset << " elements" << std::endl;
     ss << indent << "ndims: " << ndims << std::endl;
     ss << indent << "version: " << version << std::endl;
     ss << indent << "overlap_type: " << to_str(overlap_type) << std::endl;
@@ -137,7 +140,7 @@ std::string TensorDescriptor::dump() const {
         }
         ss << strides[i];
     }
-    ss << "]" << std::endl;
+    ss << "] (elements)" << std::endl;
     ss << indent << "repeats: [";
     for (uint64_t i = 0; i < ndims; i++) {
         if (i > 0) {
@@ -152,9 +155,6 @@ std::string TensorDescriptor::dump() const {
 
 bool TensorDescriptor::is_valid_tensor() const {
     if (strides[ndims - 1] != 1) {
-        return false;
-    }
-    if (size % strides[0] != 0) {
         return false;
     }
     // After resort_strides, strides are sorted in descending order:
@@ -173,7 +173,10 @@ bool TensorDescriptor::is_valid_tensor() const {
             return false;
         }
     }
-    if (get_fuzzy_seg().end > size) {
+    // get_fuzzy_seg() returns element offsets, convert to bytes and check against buffer.size
+    Segment fuzzy_seg = get_fuzzy_seg();
+    uint64_t end_byte_offset = fuzzy_seg.end * get_element_size(dtype);
+    if (end_byte_offset > (uint64_t)buffer.size) {
         return false;
     }
     return true;
@@ -344,7 +347,7 @@ TensorDescriptor TensorDescriptor::reshape(const std::vector<uint64_t>& shapes) 
         stride *= shapes[i];
     }
 
-    return TensorDescriptor(addr, size, start_offset, new_strides, new_repeats, new_ndims, version, overlap_type);
+    return TensorDescriptor(buffer.addr, buffer.size, start_offset, new_strides, new_repeats, new_ndims, dtype, version, overlap_type);
 }
 
 TensorDescriptor TensorDescriptor::transpose(uint64_t x, uint64_t y) const {
@@ -404,9 +407,21 @@ bool TensorDescriptor::is_overlap(const TensorDescriptor& pre_task_output) const
         return true;
     }
 
-    Segment input_memory_fuzze_seg = get_fuzzy_seg();
-    Segment output_memory_fuzze_seg = pre_task_output.get_fuzzy_seg();
-    if (!input_memory_fuzze_seg.line_segment_intersection(output_memory_fuzze_seg)) {
+    // Convert element offsets to byte offsets for comparison
+    // This handles cases where the two descriptors have different dtypes
+    uint64_t elem_size_input = get_element_size(dtype);
+    uint64_t elem_size_output = get_element_size(pre_task_output.dtype);
+
+    Segment input_memory_fuzzy_seg = get_fuzzy_seg();
+    Segment output_memory_fuzzy_seg = pre_task_output.get_fuzzy_seg();
+
+    // Convert to byte offsets
+    Segment input_byte_seg{input_memory_fuzzy_seg.begin * elem_size_input,
+                           input_memory_fuzzy_seg.end * elem_size_input};
+    Segment output_byte_seg{output_memory_fuzzy_seg.begin * elem_size_output,
+                            output_memory_fuzzy_seg.end * elem_size_output};
+
+    if (!input_byte_seg.line_segment_intersection(output_byte_seg)) {
         return false;
     }
 
@@ -422,8 +437,9 @@ bool TensorDescriptor::is_overlap(const TensorDescriptor& pre_task_output) const
         return true;
     }
 
-    // 精准判断
-    if (ndims == pre_task_output.ndims && is_same_strides(pre_task_output)) {
+    // 精准判断 - only if same dtype and strides
+    // For different dtypes, we fall back to complex_overlap
+    if (dtype == pre_task_output.dtype && ndims == pre_task_output.ndims && is_same_strides(pre_task_output)) {
         std::vector<uint64_t> input_offset_ndims = offset_to_ndims();
         std::vector<uint64_t> output_offset_ndims = pre_task_output.offset_to_ndims();
         debug_assert(input_offset_ndims.size() == ndims);
@@ -463,15 +479,26 @@ bool TensorDescriptor::complex_overlap(const TensorDescriptor& pre_task_output) 
 #ifndef NDEBUG
     OverlapPathTracker::record_complex_call();
 #endif
+    // Convert element offsets to byte offsets for comparison when dtypes differ
+    uint64_t elem_size_input = get_element_size(dtype);
+    uint64_t elem_size_output = get_element_size(pre_task_output.dtype);
+
     ContiguousMemSegIterator input_segs_iter(*this);
     ContiguousMemSegIterator output_segs_iter(pre_task_output);
     while (!input_segs_iter.is_end() && !output_segs_iter.is_end()) {
         const Segment& cur_input_memory_seg = *input_segs_iter;
         const Segment& cur_output_memory_seg = *output_segs_iter;
-        if (cur_input_memory_seg.end <= cur_output_memory_seg.begin) {
+
+        // Convert to byte offsets for comparison
+        Segment input_byte_seg{cur_input_memory_seg.begin * elem_size_input,
+                               cur_input_memory_seg.end * elem_size_input};
+        Segment output_byte_seg{cur_output_memory_seg.begin * elem_size_output,
+                                cur_output_memory_seg.end * elem_size_output};
+
+        if (input_byte_seg.end <= output_byte_seg.begin) {
             input_segs_iter++;
             continue;
-        } else if (cur_output_memory_seg.end <= cur_input_memory_seg.begin) {
+        } else if (output_byte_seg.end <= input_byte_seg.begin) {
             output_segs_iter++;
             continue;
         }

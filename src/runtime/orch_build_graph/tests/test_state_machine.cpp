@@ -49,13 +49,15 @@ static int mock_copy_from_device(void* host, const void* dev, size_t size) {
 // Helpers (same as pto_example_orch.cpp)
 // ============================================================================
 
-static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size, int32_t version = 0) {
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size_bytes, int32_t version = 0, DataType dtype = DataType::UINT8) {
     TensorDescriptor t = {};
-    t.addr = addr;
+    t.buffer = {addr, size_bytes};
+    uint64_t size_elements = size_bytes / get_element_size(dtype);
     t.start_offset = 0;
     t.strides[0] = 1;
-    t.repeats[0] = size;
+    t.repeats[0] = size_elements;
     t.ndims = 1;
+    t.dtype = dtype;
     t.version = version;
     t.overlap_type = OverlapType::Fuzzy;
     return t;

@@ -2,11 +2,10 @@
  * Orchestration Build Graph Types - Data structures for orchestration runtime extensions
  *
  * Standalone header defining orchestration-specific types for:
- * - PTOBufferHandle: Buffer with version tracking for in-place updates
  * - PTOParam: Parameter descriptor for pto_submit_task API
  * - PTOWorkerType: Worker types for heterogeneous scheduling
  *
- * Tensor descriptor types (TensorDescriptor, PTOOverlapStrategy) are
+ * Tensor descriptor types (TensorDescriptor, PTOBufferHandle, PTOOverlapStrategy) are
  * defined in tensor_descriptor.h.
  *
  * This header is independent of orch_build_graph_runtime.h to allow inclusion from runtime.h
@@ -57,26 +56,6 @@ enum class PTOWorkerType : int32_t {
 
 // Number of worker types (used for array sizing)
 constexpr int32_t PTO_NUM_WORKER_TYPES = 2;
-
-// =============================================================================
-// Buffer Handle
-// =============================================================================
-
-/**
- * Buffer Handle
- *
- * Represents a device memory buffer. Version tracking is managed via
- * TensorDescriptor::version for dependency detection.
- *
- * Buffer lifetime is tied to producer task lifetime (no separate ref count).
- * Allocation is implicit during pto_submit_task() for OUTPUT params.
- *
- * See: divergence-to-original-orchestration.md §5, §6
- */
-struct PTOBufferHandle {
-    uint64_t addr;  // Device memory address
-    int32_t size;   // Buffer size in bytes
-};
 
 // =============================================================================
 // Parameter Types (for pto_submit_task API)

@@ -119,7 +119,7 @@ static inline int32_t tensormap_hash(TensorMap* tm, uint64_t addr) { return (add
 static inline void tensormap_insert(
     TensorMap* tm, const TensorDescriptor* tensor, int32_t producer_task_id, int32_t version) {
     // Compute hash bucket
-    int32_t bucket = tensormap_hash(tm, tensor->addr);
+    int32_t bucket = tensormap_hash(tm, tensor->buffer.addr);
 
     // Allocate entry from ring buffer (bump pointer)
     int32_t slot = tm->pool_head;
@@ -153,7 +153,7 @@ static inline void tensormap_insert(
  */
 static inline int32_t tensormap_lookup(TensorMap* tm, const TensorDescriptor* tensor, int32_t last_task_alive) {
     // Compute hash bucket
-    int32_t bucket = tensormap_hash(tm, tensor->addr);
+    int32_t bucket = tensormap_hash(tm, tensor->buffer.addr);
 
     // Traverse bucket chain
     int32_t entry_idx = tm->buckets[bucket];
@@ -193,7 +193,7 @@ template <typename Func>
 static inline void tensormap_lookup_all(
     TensorMap* tm, const TensorDescriptor* tensor, int32_t last_task_alive, Func callback, void* ctx) {
     // Compute hash bucket
-    int32_t bucket = tensormap_hash(tm, tensor->addr);
+    int32_t bucket = tensormap_hash(tm, tensor->buffer.addr);
 
     // Traverse bucket chain
     int32_t entry_idx = tm->buckets[bucket];

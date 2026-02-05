@@ -252,7 +252,7 @@ struct TestRegistrar {
  */
 bool brute_force_memory_overlap(const TensorDescriptor& t1, const TensorDescriptor& t2) {
     // 计算需要的数组大小（取两个 tensor 的最大可能 offset）
-    uint64_t max_size = std::max(t1.size, t2.size);
+    uint64_t max_size = std::max(t1.buffer.size, t2.buffer.size);
 
     // 使用 vector<bool> 作为标记数组
     std::vector<bool> marked(max_size, false);
@@ -327,7 +327,7 @@ void verify_overlap_consistency(
     bool brute_force_result = brute_force_memory_overlap(input, output);
 
     // 对于同 addr、同 version 的情况，两者应该一致
-    if (input.addr == output.addr && input.version == output.version && output.overlap_type == OverlapType::Accurate) {
+    if (input.buffer.addr == output.buffer.addr && input.version == output.version && output.overlap_type == OverlapType::Accurate) {
         if (is_overlap_result != brute_force_result) {
             printf(
                 "  [MISMATCH] %s: is_overlap=%d, brute_force=%d\n", test_name, is_overlap_result, brute_force_result);
@@ -342,7 +342,7 @@ void verify_overlap_consistency(
     ASSERT_TRUE(is_overlap_result == expected_overlap);
 
     // 额外输出暴力验证结果用于调试
-    if (brute_force_result != expected_overlap && input.addr == output.addr && input.version == output.version) {
+    if (brute_force_result != expected_overlap && input.buffer.addr == output.buffer.addr && input.version == output.version) {
         printf("  [BRUTE_FORCE] actual_memory_overlap=%d\n", brute_force_result);
     }
 }
@@ -354,12 +354,13 @@ void verify_overlap_consistency(
  * 创建 TensorDescriptor 的辅助函数
  */
 TensorDescriptor make_tensor(uint64_t addr,
-    uint64_t size,
+    int32_t buffer_size_bytes,
     uint64_t start_offset,
     std::vector<uint64_t> strides_vec,
     std::vector<uint64_t> repeats_vec,
     int32_t version,
-    OverlapType overlap_type = OverlapType::Accurate) {
+    OverlapType overlap_type = OverlapType::Accurate,
+    DataType dtype = DataType::UINT8) {
     uint64_t strides[RUNTIME_MAX_TENSOR_DIMS] = {0};
     uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS] = {0};
     uint64_t ndims = strides_vec.size();
@@ -369,7 +370,7 @@ TensorDescriptor make_tensor(uint64_t addr,
         repeats[i] = repeats_vec[i];
     }
 
-    return TensorDescriptor(addr, size, start_offset, strides, repeats, ndims, version, overlap_type);
+    return TensorDescriptor(addr, buffer_size_bytes, start_offset, strides, repeats, ndims, dtype, version, overlap_type);
 }
 
 /**

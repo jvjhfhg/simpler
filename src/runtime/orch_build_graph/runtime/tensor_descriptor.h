@@ -3,10 +3,22 @@
 #include <vector>
 
 #include "common.h"
+#include "data_type.h"
 
 #pragma once
 
 #define RUNTIME_MAX_TENSOR_DIMS 8
+
+/**
+ * Buffer Handle
+ *
+ * Represents a device memory buffer with address and total size in bytes.
+ * This is the underlying memory allocation that a TensorDescriptor describes access patterns for.
+ */
+struct PTOBufferHandle {
+    uint64_t addr;  // Device memory address (bytes)
+    int32_t size;   // Total buffer size in bytes
+};
 
 #ifndef NDEBUG
 // 用于测试追踪 complex_overlap 是否被调用
@@ -42,12 +54,17 @@ static constexpr uint64_t RESHAPE_NEEDS_ALLOC = UINT64_MAX;
  * Describes a strided memory access pattern on Global Memory (GM).
  * This allows expressing non-contiguous but regular memory layouts.
  *
- * Example: addr=base, start_offset=7, strides=[10, 1], repeats=[3, 6]
- * Memory access pattern (from innermost to outermost dimension):
- *   - Start at addr + 7
+ * IMPORTANT: After Phase 1 refactoring:
+ * - `buffer` contains the underlying memory allocation (addr in bytes, size in bytes)
+ * - `start_offset`, `strides[]`, `repeats[]` are in ELEMENTS
+ * - `dtype` specifies element type for interpreting buffer contents
+ *
+ * Example: buffer.addr=base, dtype=FLOAT32, start_offset=7, strides=[10, 1], repeats=[3, 6]
+ * Memory access pattern (from innermost to outermost dimension, in elements):
+ *   - Start at buffer.addr + 7*4 bytes
  *   - Inner dim (strides[1]=1, repeats[1]=6): access 6 consecutive elements
- *   - Outer dim (strides[0]=10, repeats[0]=3): repeat 3 times with stride 10
- * Result: [addr+7..addr+12], [addr+17..addr+22], [addr+27..addr+32]
+ *   - Outer dim (strides[0]=10, repeats[0]=3): repeat 3 times with stride 10 elements
+ * Result: [addr+28..addr+48], [addr+68..addr+88], [addr+108..addr+128] (byte offsets)
  */
 struct TensorDescriptor {
     class ContiguousMemSegIterator {
@@ -67,32 +84,34 @@ struct TensorDescriptor {
         std::vector<uint64_t> indexes_;
     };
 
-    uint64_t addr;                              // Base address in GM, unit: uint8_t *
-    uint64_t size;                              // total memory size, unit: byte
-    uint64_t start_offset;                      // Starting offset from addr
-    uint64_t strides[RUNTIME_MAX_TENSOR_DIMS];  // Stride for each dimension
-    uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS];  // Repeat count for each dimension
-    uint64_t ndims;                             // Number of dimensions used
-    int32_t version;                            // tensor的版本
-    OverlapType overlap_type;                   // 判断覆盖的方式
+    PTOBufferHandle buffer;                         // Underlying memory buffer (addr in bytes, size in bytes)
+    uint64_t start_offset;                          // Starting offset from buffer.addr, unit: elements
+    uint64_t strides[RUNTIME_MAX_TENSOR_DIMS];      // Stride for each dimension, unit: elements
+    uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS];      // Repeat count for each dimension
+    uint64_t ndims;                                 // Number of dimensions used
+    DataType dtype;                                 // Data type of tensor elements
+    int32_t version;                                // tensor的版本
+    OverlapType overlap_type;                       // 判断覆盖的方式
 
-    TensorDescriptor() : addr(0), size(0), ndims(0) {}
+    TensorDescriptor() : buffer{0, 0}, ndims(0), dtype(DataType::FLOAT32) {}
 
     explicit TensorDescriptor(uint64_t addr,
-        uint64_t size,
+        int32_t buffer_size_bytes,
         uint64_t start_offset,
         uint64_t strides[],
         uint64_t repeats[],
         uint64_t ndims,
+        DataType dtype,
         int32_t version,
         OverlapType overlap_type = OverlapType::Accurate);
 
     explicit TensorDescriptor(uint64_t addr,
-        uint64_t size,
+        int32_t buffer_size_bytes,
         uint64_t start_offset,
         const std::vector<uint64_t>& strides,
         const std::vector<uint64_t>& repeats,
         uint64_t ndims,
+        DataType dtype,
         int32_t version,
         OverlapType overlap_type = OverlapType::Accurate);
 
@@ -137,7 +156,7 @@ struct TensorDescriptor {
 
     Segment get_fuzzy_seg() const;
 
-    bool is_same_memref(const TensorDescriptor& other) const { return addr == other.addr; }
+    bool is_same_memref(const TensorDescriptor& other) const { return buffer.addr == other.buffer.addr; }
 
     bool is_same_strides(const TensorDescriptor& other) const;
 

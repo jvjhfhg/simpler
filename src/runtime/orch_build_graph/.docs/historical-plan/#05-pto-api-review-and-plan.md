@@ -46,46 +46,77 @@
     New `TensorDescriptor` definition:
 
     ```c++
-        struct TensorDescriptor {
-        uint64_t addr;                              // GM 基地址
-        uint64_t size;                              // 总内存大小 (元素个数)
-        uint64_t start_offset;                      // 起始偏移 (元素个数)
-        uint64_t strides[RUNTIME_MAX_TENSOR_DIMS];  // 各维度步长 (元素个数), 索引0为高维
-        uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS];  // 各维度重复次数, 索引0为高维
-        uint64_t ndims;                             // 使用的维度数
-        DataType dtype;                             // 数据类型
-        int32_t version;                            // 张量版本号
-        OverlapType overlap_type;                   // 重叠检测类型
+    struct PTOBufferHandle {
+        uint64_t addr;  // Device memory address (bytes)
+        int32_t size;   // Total buffer size in bytes
+    };
+
+    struct TensorDescriptor {
+        PTOBufferHandle buffer;                         // Underlying memory buffer
+        uint64_t start_offset;                          // 起始偏移 (元素个数)
+        uint64_t strides[RUNTIME_MAX_TENSOR_DIMS];      // 各维度步长 (元素个数), 索引0为高维
+        uint64_t repeats[RUNTIME_MAX_TENSOR_DIMS];      // 各维度重复次数, 索引0为高维
+        uint64_t ndims;                                 // 使用的维度数
+        DataType dtype;                                 // 数据类型
+        int32_t version;                                // 张量版本号
+        OverlapType overlap_type;                       // 重叠检测类型
     };
     ```
 
     `is_overlap` needs to be adapted when the two `TensorDescriptor`'s have different dtypes.
 
-   > **Analysis (2026-02-05)**: Still a gap. Current `TensorDescriptor` ([tensor_descriptor.h](runtime/tensor_descriptor.h)) has no `DataType dtype` field. Units are bytes, not elements. No `DataType` enum exists in codebase. `is_overlap()` operates on byte-level addresses only. **Status: Open.**
+   > **Analysis & Implementation (2026-02-05)**: **COMPLETED**.
+   >
+   > **Key Design Decision**: Refactored `TensorDescriptor` to embed `PTOBufferHandle buffer` instead of separate `addr` and `size` fields. This eliminates redundancy and clarifies that:
+   > - `buffer` represents the underlying memory allocation (addr in bytes, size in bytes)
+   > - `dtype` specifies how to interpret the buffer contents
+   > - `start_offset`, `strides[]`, `repeats[]` are in element units
+   >
+   > **Implementation Details**:
+   > - Added `DataType` enum in [runtime/data_type.h](runtime/data_type.h) with FLOAT32, FLOAT16, INT32, INT16, INT8, UINT8, BFLOAT16, INT64, UINT64
+   > - Moved `PTOBufferHandle` definition from `pto_types.h` to `tensor_descriptor.h` (more appropriate location)
+   > - Updated `TensorDescriptor` structure:
+   >   - Replaced `addr` + `size` with embedded `PTOBufferHandle buffer`
+   >   - Added `DataType dtype` field
+   >   - All dimensional fields (`start_offset`, `strides[]`, `repeats[]`) now use element units
+   > - Updated `is_overlap()` and `complex_overlap()` to convert element offsets to bytes when comparing different dtypes
+   > - Updated all call sites: runtime.cpp, test files, orchestration examples, tensor_map.h
+   > - All tests pass (307 runtime tests + 152 tensor descriptor tests)
+   >
+   > **Status: Closed.**
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Add DataType support (addresses #4)
+### Phase 1: Add DataType support (addresses #4) - ✅ COMPLETED
 
-1. **Add `DataType` enum** in `runtime/data_type.h`
-   - Define enum with FLOAT32, FLOAT16, INT32, INT16, INT8, UINT8, BFLOAT16, INT64, UINT64
-   - Add `get_element_size(DataType)` helper
+**Implemented (2026-02-05)**:
 
-2. **Update `TensorDescriptor`**
-   - Add `DataType dtype` field
-   - Keep byte-based `addr` (hardware requirement)
-   - Convert `size`, `start_offset`, `strides[]`, `repeats[]` to element-wise units
-   - Add `size_bytes()` helper: `size * get_element_size(dtype)`
+1. **Added `DataType` enum** in [runtime/data_type.h](runtime/data_type.h)
+   - Defined enum with FLOAT32, FLOAT16, INT32, INT16, INT8, UINT8, BFLOAT16, INT64, UINT64
+   - Added `get_element_size(DataType)` helper
+   - Added `get_dtype_name(DataType)` helper for debugging
 
-3. **Update `is_overlap()`**
-   - Convert element offsets to bytes when comparing descriptors with different dtypes
-   - Core logic: compare byte ranges regardless of dtype
+2. **Refactored `TensorDescriptor`** ([tensor_descriptor.h](runtime/tensor_descriptor.h))
+   - **Key change**: Replaced separate `addr` and `size` fields with embedded `PTOBufferHandle buffer`
+   - Added `DataType dtype` field
+   - `buffer.addr` and `buffer.size` remain in bytes (hardware/allocation requirement)
+   - Converted `start_offset`, `strides[]`, `repeats[]` to element-wise units
+   - Removed `size_bytes()` helper (no longer needed - just use `buffer.size`)
 
-4. **Update all call sites**
-   - Orchestration functions: specify dtype when creating descriptors
-   - Allocation: use `size_bytes()` instead of raw `size`
+3. **Updated `is_overlap()`** ([tensor_descriptor.cpp](runtime/tensor_descriptor.cpp))
+   - Converts element offsets to bytes when comparing descriptors with different dtypes
+   - Core logic: compares byte ranges regardless of dtype
+   - Falls back to `complex_overlap()` for different dtypes
+
+4. **Updated all call sites**
+   - [runtime.cpp](runtime/runtime.cpp): Uses `buffer.size` for allocation (already in bytes)
+   - [tensor_map.h](runtime/tensor_map.h): Uses `buffer.addr` for hashing
+   - Test files: Updated `make_tensor_bbox()` helpers to use new structure
+   - [orch_example_orch.cpp](../../../examples/orch_build_graph_example/kernels/orchestration/orch_example_orch.cpp): Updated helper functions
+
+**Test Results**: All 459 tests pass (307 runtime + 152 tensor descriptor tests)
 
 ### Phase 2: Validate allocation constraints (addresses #2)
 

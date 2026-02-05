@@ -33,8 +33,10 @@
 #include "runtime.h"
 
 // Helper: create a BoundingBox tensor descriptor
-static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size, int32_t version = 0) {
-    TensorDescriptor t(addr, size, 0, {1}, {static_cast<uint64_t>(size)}, 1, version);
+static TensorDescriptor make_tensor_bbox(uint64_t addr, int32_t size_bytes, int32_t version = 0, DataType dtype = DataType::FLOAT32) {
+    // size_bytes is the total buffer size in bytes
+    uint64_t size_elements = size_bytes / get_element_size(dtype);
+    TensorDescriptor t(addr, size_bytes, 0, {1}, {size_elements}, 1, dtype, version);
     return t;
 }
 
