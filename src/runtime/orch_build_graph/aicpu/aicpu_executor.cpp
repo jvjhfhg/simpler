@@ -3,6 +3,10 @@
  *
  * Uses PtoScheduler with per-worker-type FIFO ready queues.
  * Legacy scheduler has been removed - PTO is the only mode.
+ *
+ * Device orchestration mode:
+ * - Thread 3 runs as orchestrator (loads SO, builds task graph)
+ * - Threads 0-2 run as schedulers (wait for orchestration, dispatch tasks)
  */
 
 #include "runtime.h"
@@ -11,9 +15,17 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
 
 // Platform-specific logging
 #include "aicpu/device_log.h"
+
+// Orchestration function signature
+typedef int (*OrchestrationFunc)(Runtime* runtime, uint64_t* args, int arg_count);
 
 // =============================================================================
 // Common Constants
@@ -48,7 +60,12 @@ struct PtoScheduler {
     std::atomic<bool> init_failed_{false};
     std::atomic<bool> finished_{false};
 
+    // Orchestration synchronization (for device orchestration mode)
+    std::atomic<bool> orchestration_done_{false};
+    std::atomic<bool> orchestration_failed_{false};
+
     int thread_num_{0};
+    int scheduler_thread_num_{0};  // Number of scheduler threads (excludes orchestrator)
     int cores_total_num_{0};
     int thread_cores_num_{0};
     int core_assignments_[MAX_AICPU_THREADS][MAX_CORES_PER_THREAD];
@@ -68,6 +85,8 @@ struct PtoScheduler {
     int schedule_and_dispatch(Runtime& runtime, int thread_idx, const int* cur_thread_cores, int core_num);
     int shutdown_cores(Runtime* runtime, int thread_idx, const int* cur_thread_cores);
     int run(Runtime* runtime);
+    int run_orchestrator(Runtime* runtime);
+    int run_scheduler(Runtime* runtime, int thread_idx);
     void deinit();
 
     // Helper: enqueue task to appropriate ready queue
@@ -76,6 +95,9 @@ struct PtoScheduler {
     int dequeue_ready_task(int worker_type);
     // Helper: check if ready queue has tasks
     bool has_ready_tasks(int worker_type);
+
+    // Helper: load SO from device memory
+    void* dlopen_from_memory(const void* so_data, size_t so_size);
 };
 
 static PtoScheduler g_pto_scheduler;
@@ -133,6 +155,11 @@ int PtoScheduler::init(Runtime* runtime) {
         return -1;
     }
 
+    // CRITICAL: Reinitialize DepListPool base pointer after host-to-device copy
+    // The original pointer was set on host and is invalid on device
+    runtime->reinit_dep_list_pool_base();
+    DEV_INFO("PTO Scheduler: Reinitialized DepListPool base pointer");
+
     thread_num_ = runtime->sche_cpu_num;
     if (thread_num_ == 0) thread_num_ = 1;
 
@@ -142,9 +169,27 @@ int PtoScheduler::init(Runtime* runtime) {
         return -1;
     }
 
+    // Check orchestration mode
+    int orch_mode = runtime->get_orchestration_mode();
+    DEV_INFO("PTO Scheduler: orchestration_mode=%d", orch_mode);
+
+    // In device orchestration mode, thread 3 is the orchestrator
+    // Scheduler threads are 0 to (thread_num - 2) if orch_mode == 1
+    if (orch_mode == 1) {
+        scheduler_thread_num_ = thread_num_ - 1;  // Reserve thread 3 for orchestrator
+        if (scheduler_thread_num_ < 1) {
+            DEV_ERROR("Device orchestration requires at least 2 threads (1 scheduler + 1 orchestrator)");
+            init_failed_.store(true, std::memory_order_release);
+            return -1;
+        }
+        DEV_INFO("PTO Scheduler: Device orchestration mode, %d scheduler threads + 1 orchestrator", scheduler_thread_num_);
+    } else {
+        scheduler_thread_num_ = thread_num_;  // All threads are schedulers
+    }
+
     // Use worker_count from platform (like host_build_graph does)
     cores_total_num_ = runtime->worker_count;
-    thread_cores_num_ = cores_total_num_ / thread_num_;
+    thread_cores_num_ = cores_total_num_ / scheduler_thread_num_;
 
     if (cores_total_num_ == 0) {
         DEV_ERROR("worker_count is 0, no cores to schedule");
@@ -158,26 +203,53 @@ int PtoScheduler::init(Runtime* runtime) {
         return -1;
     }
 
-    DEV_INFO("PTO Config: threads=%d, cores=%d, cores_per_thread=%d", thread_num_, cores_total_num_, thread_cores_num_);
+    DEV_INFO("PTO Config: threads=%d, scheduler_threads=%d, cores=%d, cores_per_thread=%d",
+             thread_num_, scheduler_thread_num_, cores_total_num_, thread_cores_num_);
 
     // Platform sets core_type on each Handshake, so we just need to assign cores to threads
-    int cores_per_thread = cores_total_num_ / thread_num_;
+    int cores_per_thread = cores_total_num_ / scheduler_thread_num_;
 
-    if (cores_total_num_ % thread_num_ != 0) {
-        DEV_ERROR("worker_count (%d) must be divisible by thread_num (%d)", cores_total_num_, thread_num_);
+    if (cores_total_num_ % scheduler_thread_num_ != 0) {
+        DEV_ERROR("worker_count (%d) must be divisible by scheduler_thread_num (%d)", cores_total_num_, scheduler_thread_num_);
         init_failed_.store(true, std::memory_order_release);
         return -1;
     }
 
-    // Assign cores to threads (simple sequential assignment)
-    for (int t = 0; t < thread_num_; t++) {
+    // Assign cores to scheduler threads (simple sequential assignment)
+    for (int t = 0; t < scheduler_thread_num_; t++) {
         int start_core = t * cores_per_thread;
         for (int i = 0; i < cores_per_thread; i++) {
             core_assignments_[t][i] = start_core + i;
         }
     }
 
-    total_tasks_.store(runtime->get_task_count(), std::memory_order_release);
+    // CENTRALIZED HANDSHAKE: Handshake with ALL cores during init (like host_build_graph)
+    // This ensures all cores are ready before any thread starts scheduling
+    DEV_INFO("PTO Scheduler: Handshaking with all %d cores", cores_total_num_);
+    Handshake* all_hanks = (Handshake*)runtime->workers;
+
+    // Step 1: Send handshake signal to all cores
+    for (int i = 0; i < cores_total_num_; i++) {
+        all_hanks[i].aicpu_ready = 1;
+    }
+
+    // Step 2: Wait for all cores to respond
+    for (int i = 0; i < cores_total_num_; i++) {
+        Handshake* hank = &all_hanks[i];
+        while (hank->aicore_done == 0) {
+            // Busy wait for core response
+        }
+        DEV_INFO("PTO Scheduler: Core %d ready (type=%d)", i, static_cast<int>(hank->core_type));
+    }
+    DEV_INFO("PTO Scheduler: All cores handshake complete");
+
+    // In host orchestration mode, tasks are already built
+    // In device orchestration mode, tasks will be built by orchestrator thread
+    if (orch_mode == 0) {
+        total_tasks_.store(runtime->get_task_count(), std::memory_order_release);
+    } else {
+        total_tasks_.store(0, std::memory_order_release);  // Will be set after orchestration
+    }
     completed_tasks_.store(0, std::memory_order_release);
 
     // Initialize FIFO ready queues
@@ -186,18 +258,24 @@ int PtoScheduler::init(Runtime* runtime) {
         ready_tail_[wt].store(0, std::memory_order_release);
     }
 
-    // Find initially ready tasks and enqueue them (FIFO order)
-    int initial_ready[RUNTIME_MAX_TASKS];
-    int initial_count = runtime->get_initial_ready_tasks(initial_ready);
+    // In host orchestration mode, find initially ready tasks and enqueue them
+    if (orch_mode == 0) {
+        int initial_ready[RUNTIME_MAX_TASKS];
+        int initial_count = runtime->get_initial_ready_tasks(initial_ready);
 
-    DEV_INFO("PTO Init: Found %d initially ready tasks", initial_count);
+        DEV_INFO("PTO Init: Found %d initially ready tasks", initial_count);
 
-    for (int i = 0; i < initial_count; i++) {
-        Task* task = runtime->get_task(initial_ready[i]);
-        // core_type: 0=AIC (CUBE), 1=AIV (VECTOR)
-        int worker_type = task->core_type;
-        enqueue_ready_task(initial_ready[i], worker_type);
+        for (int i = 0; i < initial_count; i++) {
+            Task* task = runtime->get_task(initial_ready[i]);
+            // core_type: 0=AIC (CUBE), 1=AIV (VECTOR)
+            int worker_type = task->core_type;
+            enqueue_ready_task(initial_ready[i], worker_type);
+        }
     }
+
+    // Reset orchestration synchronization
+    orchestration_done_.store(false, std::memory_order_release);
+    orchestration_failed_.store(false, std::memory_order_release);
 
     finished_count_.store(0, std::memory_order_release);
 
@@ -413,14 +491,187 @@ int PtoScheduler::run(Runtime* runtime) {
 
     DEV_INFO("PTO Thread %d: Start", thread_idx);
 
-    const int* cur_thread_cores = core_assignments_[thread_idx];
+    // Check orchestration mode
+    int orch_mode = runtime->get_orchestration_mode();
 
-    // Handshake with AICore workers
-    auto rc = handshake_cores(runtime, thread_idx, cur_thread_cores);
+    // In device orchestration mode, thread (thread_num - 1) is the orchestrator
+    if (orch_mode == 1 && thread_idx == thread_num_ - 1) {
+        return run_orchestrator(runtime);
+    }
+
+    // All other threads are schedulers
+    return run_scheduler(runtime, thread_idx);
+}
+
+// Helper: Load SO from device memory via memfd_create or temp file
+void* PtoScheduler::dlopen_from_memory(const void* so_data, size_t so_size) {
+#ifdef __linux__
+    // Try memfd_create first (Linux 3.17+)
+    int fd = syscall(SYS_memfd_create, "orch_so", 0);
+    if (fd >= 0) {
+        ssize_t written = write(fd, so_data, so_size);
+        if (written < 0 || static_cast<size_t>(written) != so_size) {
+            DEV_ERROR("Failed to write SO to memfd: wrote %zd of %zu bytes", written, so_size);
+            close(fd);
+        } else {
+            char fd_path[64];
+            snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+            void* handle = dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
+            close(fd);
+
+            if (handle != nullptr) {
+                DEV_INFO("Loaded SO via memfd_create");
+                return handle;
+            }
+            DEV_WARN("dlopen from memfd failed: %s, trying temp file", dlerror());
+        }
+    }
+#endif
+
+    // Fallback: Write SO to temp file and dlopen it
+    // Use PID to avoid conflicts between processes
+    char fd_path[128];
+    snprintf(fd_path, sizeof(fd_path), "/tmp/pto_orch_so_aicpu_%d.so", getpid());
+
+    int fd2 = open(fd_path, O_WRONLY | O_CREAT | O_TRUNC, 0700);
+    if (fd2 < 0) {
+        DEV_ERROR("Failed to create temp SO file: %s", fd_path);
+        return nullptr;
+    }
+
+    ssize_t written = write(fd2, so_data, so_size);
+    if (written < 0 || static_cast<size_t>(written) != so_size) {
+        DEV_ERROR("Failed to write SO to temp file: wrote %zd of %zu bytes", written, so_size);
+        close(fd2);
+        unlink(fd_path);
+        return nullptr;
+    }
+    close(fd2);
+
+    void* handle = dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
+    unlink(fd_path);  // Remove temp file after loading
+
+    if (handle == nullptr) {
+        DEV_ERROR("dlopen failed: %s", dlerror());
+        return nullptr;
+    }
+
+    DEV_INFO("Loaded SO via temp file");
+    return handle;
+}
+
+int PtoScheduler::run_orchestrator(Runtime* runtime) {
+    DEV_INFO("Orchestrator thread starting");
+
+    // Get orchestration SO from device memory
+    void* so_data = runtime->get_device_orch_so();
+    size_t so_size = runtime->get_device_orch_so_size();
+    const char* func_name = runtime->get_orch_func_name();
+
+    if (so_data == nullptr || so_size == 0 || func_name == nullptr || func_name[0] == '\0') {
+        DEV_ERROR("Invalid orchestration parameters: so_data=%p, so_size=%zu, func_name=%s",
+                  so_data, so_size, func_name ? func_name : "(null)");
+        orchestration_failed_.store(true, std::memory_order_release);
+        return -1;
+    }
+
+    DEV_INFO("Orchestrator: Loading SO (%zu bytes), function: %s", so_size, func_name);
+
+    // Load SO from device memory
+    void* handle = dlopen_from_memory(so_data, so_size);
+    if (handle == nullptr) {
+        DEV_ERROR("Orchestrator: Failed to load orchestration SO");
+        orchestration_failed_.store(true, std::memory_order_release);
+        return -1;
+    }
+
+    // Get orchestration function
+    dlerror();  // Clear any existing error
+    OrchestrationFunc orch_func = reinterpret_cast<OrchestrationFunc>(dlsym(handle, func_name));
+    const char* dlsym_error = dlerror();
+    if (dlsym_error != nullptr) {
+        DEV_ERROR("Orchestrator: dlsym failed for '%s': %s", func_name, dlsym_error);
+        dlclose(handle);
+        orchestration_failed_.store(true, std::memory_order_release);
+        return -1;
+    }
+
+    DEV_INFO("Orchestrator: Loaded function %s at %p", func_name, (void*)orch_func);
+
+    // Note: pto_init() is already called on host side in init_runtime_impl
+    // to pre-allocate HeapRing memory (host_api is not available on AICPU)
+
+    // Call orchestration function (builds task graph)
+    uint64_t* args = runtime->get_device_args();
+    int args_count = runtime->get_device_args_count();
+
+    DEV_INFO("Orchestrator: Calling orchestration function with %d args", args_count);
+
+    int rc = orch_func(runtime, args, args_count);
     if (rc != 0) {
+        DEV_ERROR("Orchestrator: Orchestration function failed with code %d", rc);
+        dlclose(handle);
+        orchestration_failed_.store(true, std::memory_order_release);
         return rc;
     }
 
+    dlclose(handle);
+
+    // Update total tasks count after orchestration
+    int task_count = runtime->get_task_count();
+    total_tasks_.store(task_count, std::memory_order_release);
+
+    DEV_INFO("Orchestrator: Task graph built with %d tasks", task_count);
+
+    // Find initially ready tasks and enqueue them
+    int initial_ready[RUNTIME_MAX_TASKS];
+    int initial_count = runtime->get_initial_ready_tasks(initial_ready);
+
+    DEV_INFO("Orchestrator: Found %d initially ready tasks", initial_count);
+
+    for (int i = 0; i < initial_count; i++) {
+        Task* task = runtime->get_task(initial_ready[i]);
+        int worker_type = task->core_type;
+        enqueue_ready_task(initial_ready[i], worker_type);
+    }
+
+    // Signal schedulers that orchestration is complete
+    orchestration_done_.store(true, std::memory_order_release);
+
+    DEV_INFO("Orchestrator: Orchestration complete, signaled schedulers");
+
+    // Track thread completion
+    int prev_finished = finished_count_.fetch_add(1, std::memory_order_acq_rel);
+    if (prev_finished + 1 == thread_num_) {
+        finished_.store(true, std::memory_order_release);
+        DEV_INFO("Orchestrator: Last thread, marking scheduler finished");
+    }
+
+    return 0;
+}
+
+int PtoScheduler::run_scheduler(Runtime* runtime, int thread_idx) {
+    // Check orchestration mode
+    int orch_mode = runtime->get_orchestration_mode();
+
+    // In device orchestration mode, wait for orchestration to complete
+    if (orch_mode == 1) {
+        DEV_INFO("Scheduler %d: Waiting for orchestration to complete", thread_idx);
+
+        while (!orchestration_done_.load(std::memory_order_acquire)) {
+            if (orchestration_failed_.load(std::memory_order_acquire)) {
+                DEV_ERROR("Scheduler %d: Orchestration failed, aborting", thread_idx);
+                return -1;
+            }
+            // Spin wait (could add yield or sleep for better power efficiency)
+        }
+
+        DEV_INFO("Scheduler %d: Orchestration complete, proceeding", thread_idx);
+    }
+
+    const int* cur_thread_cores = core_assignments_[thread_idx];
+
+    // Handshaking is already done in init() - no per-thread handshake needed
     DEV_INFO("PTO Thread %d: Runtime has %d tasks", thread_idx, runtime->get_task_count());
 
     // Main scheduling loop
@@ -428,7 +679,7 @@ int PtoScheduler::run(Runtime* runtime) {
     DEV_INFO("PTO Thread %d: Executed %d tasks from runtime", thread_idx, completed);
 
     // Shutdown AICore workers
-    rc = shutdown_cores(runtime, thread_idx, cur_thread_cores);
+    int rc = shutdown_cores(runtime, thread_idx, cur_thread_cores);
     if (rc != 0) {
         return rc;
     }
@@ -455,6 +706,10 @@ void PtoScheduler::deinit() {
     completed_tasks_.store(0, std::memory_order_release);
     total_tasks_.store(0, std::memory_order_release);
     finished_count_.store(0, std::memory_order_release);
+
+    // Reset orchestration synchronization
+    orchestration_done_.store(false, std::memory_order_release);
+    orchestration_failed_.store(false, std::memory_order_release);
 
     initialized_.store(false, std::memory_order_release);
     init_done_.store(false, std::memory_order_release);

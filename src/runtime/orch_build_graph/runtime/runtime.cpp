@@ -50,6 +50,14 @@ Runtime::Runtime() {
     memset(&heap_ring_, 0, sizeof(heap_ring_));
     memset(&shared_header_, 0, sizeof(shared_header_));
 
+    // Initialize device orchestration state
+    device_orch_so_ = nullptr;
+    device_orch_so_size_ = 0;
+    memset(orch_func_name_, 0, sizeof(orch_func_name_));
+    memset(device_args_, 0, sizeof(device_args_));
+    device_args_count_ = 0;
+    orchestration_mode_ = 0;  // Default: host-side orchestration
+
     // Initialize DepListPool
     dep_list_pool_init(&dep_list_pool_, dep_list_entries_, PTO_DEP_LIST_POOL_SIZE);
 }

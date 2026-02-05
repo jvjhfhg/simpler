@@ -1,5 +1,5 @@
 /**
- * Orchestration Comprehensive Test Suite (Corrected: Scope-Based Lifecycle)
+ * Orchestration Comprehensive Test Suite (AICPU-Compatible)
  *
  * This file combines three test scenarios into a comprehensive validation:
  *
@@ -19,6 +19,13 @@
  *   f = 42.0   (diamond pattern)
  *   g = 6.0    (in-place chain: 2+4=6)
  *   h = 12.0   (multi-consumer: 3*2+6=12)
+ *
+ * AICPU Compatibility:
+ * - Accepts pre-allocated DEVICE pointers (not host pointers)
+ * - Does NOT call host_api methods (device_malloc, copy_to_device)
+ * - Does NOT call pto_init() (already done on host before AICPU launch)
+ * - Does NOT call record_tensor_pair() (already done on host)
+ * - Memory allocation for intermediates uses HeapRing (pre-allocated on host)
  *
  * Design principles applied:
  * - Memory allocation is implicit during pto_submit_task() for OUTPUT params
@@ -101,52 +108,82 @@ extern "C" {
 /**
  * Build comprehensive orchestration test graph combining all test scenarios.
  *
- * The output buffer is divided into three sections:
- * - Section 0: Diamond pattern result (f = (a+b+1)*(a+b+2))
- * - Section 1: In-place chain result  (g = a+4)
- * - Section 2: Multi-consumer result  (h = 3a+6)
+ * Supports BOTH host and device orchestration modes:
+ *
+ * HOST MODE (orchestration_mode == 0):
+ * - Args are HOST pointers
+ * - This function calls host_api.device_malloc, copy_to_device
+ * - This function calls pto_init(), record_tensor_pair()
+ *
+ * DEVICE MODE (orchestration_mode == 1):
+ * - Args are DEVICE pointers (pre-allocated by host)
+ * - Host is responsible for all memory allocation and data transfer
+ * - pto_init() already called by host before AICPU launch
+ *
+ * Args:
+ * - args[0]: pointer to input tensor a (host or device depending on mode)
+ * - args[1]: pointer to input tensor b (host or device depending on mode)
+ * - args[2]: pointer to output tensor f (host or device depending on mode)
+ * - args[3]: size_a (size in bytes)
+ * - args[4]: size_b (size in bytes)
+ * - args[5]: size_f (size in bytes)
+ * - args[6]: SIZE (number of elements)
  */
 int build_orch_example_graph(Runtime* runtime, uint64_t* args, int arg_count) {
     if (arg_count < 7) {
-        std::cerr << "build_orch_example_graph: Expected at least 7 args, got " << arg_count << '\n';
         return -1;
     }
 
-    void* host_a = reinterpret_cast<void*>(args[0]);
-    void* host_b = reinterpret_cast<void*>(args[1]);
-    void* host_f = reinterpret_cast<void*>(args[2]);
     size_t size_a = static_cast<size_t>(args[3]);
     size_t size_b = static_cast<size_t>(args[4]);
     size_t size_f = static_cast<size_t>(args[5]);
     int SIZE = static_cast<int>(args[6]);
 
-    std::cout << "\n=== Orchestration Comprehensive Test Suite ===" << '\n';
-    std::cout << "Testing: Diamond pattern, In-place updates, Multi-consumer\n";
-    std::cout << "SIZE: " << SIZE << " elements\n";
-
-    // Initialize orchestration mode
-    runtime->pto_init();
-
     int32_t BYTES = SIZE * sizeof(float);
 
-    // Allocate external input buffers via host API (pre-allocated by host)
-    std::cout << "\n=== Allocating External Input Buffers ===" << '\n';
+    // Check orchestration mode
+    int orch_mode = runtime->get_orchestration_mode();
 
-    void* dev_a_ptr = runtime->host_api.device_malloc(size_a);
-    runtime->host_api.copy_to_device(dev_a_ptr, host_a, size_a);
+    void* dev_a_ptr;
+    void* dev_b_ptr;
+    void* dev_f_ptr;
+
+    if (orch_mode == 0) {
+        // HOST MODE: args are host pointers, need to allocate and copy
+        void* host_a = reinterpret_cast<void*>(args[0]);
+        void* host_b = reinterpret_cast<void*>(args[1]);
+        void* host_f = reinterpret_cast<void*>(args[2]);
+
+        std::cout << "\n=== Orchestration (Host Mode) ===" << '\n';
+        std::cout << "SIZE: " << SIZE << " elements\n";
+
+        // Initialize orchestration mode
+        runtime->pto_init();
+
+        // Allocate and copy input buffers
+        dev_a_ptr = runtime->host_api.device_malloc(size_a);
+        runtime->host_api.copy_to_device(dev_a_ptr, host_a, size_a);
+
+        dev_b_ptr = runtime->host_api.device_malloc(size_b);
+        runtime->host_api.copy_to_device(dev_b_ptr, host_b, size_b);
+
+        // Allocate output buffer and record for copy-back
+        dev_f_ptr = runtime->host_api.device_malloc(size_f);
+        runtime->record_tensor_pair(host_f, dev_f_ptr, size_f);
+    } else {
+        // DEVICE MODE: args are already device pointers (pre-allocated by host)
+        dev_a_ptr = reinterpret_cast<void*>(args[0]);
+        dev_b_ptr = reinterpret_cast<void*>(args[1]);
+        dev_f_ptr = reinterpret_cast<void*>(args[2]);
+
+        // pto_init() already called by host
+        // tensor pairs already recorded by host
+    }
+
+    // Create buffer handles for device buffers
     PTOBufferHandle dev_a = make_external_handle(dev_a_ptr, size_a);
-    std::cout << "Tensor a: " << size_a << " bytes copied to device\n";
-
-    void* dev_b_ptr = runtime->host_api.device_malloc(size_b);
-    runtime->host_api.copy_to_device(dev_b_ptr, host_b, size_b);
     PTOBufferHandle dev_b = make_external_handle(dev_b_ptr, size_b);
-    std::cout << "Tensor b: " << size_b << " bytes copied to device\n";
-
-    // Output buffer (also external, for copy-back to host)
-    void* dev_f_ptr = runtime->host_api.device_malloc(size_f);
-    runtime->record_tensor_pair(host_f, dev_f_ptr, size_f);
     PTOBufferHandle dev_f = make_external_handle(dev_f_ptr, size_f);
-    std::cout << "Tensor f (output): " << size_f << " bytes allocated\n";
 
     // Begin scope - all intermediate buffers allocated within scope
     // are freed when scope_end is called

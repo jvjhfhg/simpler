@@ -51,6 +51,10 @@
 #define RUNTIME_MAX_TENSOR_PAIRS 64
 #endif
 
+#ifndef RUNTIME_MAX_FUNC_ID
+#define RUNTIME_MAX_FUNC_ID 64
+#endif
+
 // =============================================================================
 // Data Structures
 // =============================================================================
@@ -194,9 +198,75 @@ public:
     PTOSharedHeader* get_shared_header() { return &shared_header_; }
     DepListPool* get_dep_list_pool() { return &dep_list_pool_; }
 
+    // Reinitialize DepListPool base pointer (call on device after host-to-device copy)
+    // This is needed because dep_list_pool_.base points to host address after copy
+    void reinit_dep_list_pool_base() {
+        dep_list_pool_.base = dep_list_entries_;
+    }
+
 private:
     // Shared header for Orchestrator ↔ Scheduler communication
     PTOSharedHeader shared_header_;
+
+    // === Device-Side Orchestration State ===
+    // These fields are used when orchestration runs on AICPU thread 3
+
+    void* device_orch_so_;           // Device memory pointer to orchestration SO binary
+    size_t device_orch_so_size_;     // Size of orchestration SO binary
+    char orch_func_name_[128];       // Name of orchestration function
+    uint64_t device_args_[RUNTIME_MAX_ARGS];  // Converted device arguments
+    int device_args_count_;          // Number of device arguments
+    int orchestration_mode_;         // 0=host, 1=device
+
+public:
+    // Device orchestration accessors
+    void set_device_orch_so(void* so_ptr, size_t so_size) {
+        device_orch_so_ = so_ptr;
+        device_orch_so_size_ = so_size;
+    }
+    void* get_device_orch_so() const { return device_orch_so_; }
+    size_t get_device_orch_so_size() const { return device_orch_so_size_; }
+
+    void set_orch_func_name(const char* name) {
+        strncpy(orch_func_name_, name, sizeof(orch_func_name_) - 1);
+        orch_func_name_[sizeof(orch_func_name_) - 1] = '\0';
+    }
+    const char* get_orch_func_name() const { return orch_func_name_; }
+
+    void set_device_args(uint64_t* args, int count) {
+        device_args_count_ = count < RUNTIME_MAX_ARGS ? count : RUNTIME_MAX_ARGS;
+        for (int i = 0; i < device_args_count_; i++) {
+            device_args_[i] = args[i];
+        }
+    }
+    uint64_t* get_device_args() { return device_args_; }
+    int get_device_args_count() const { return device_args_count_; }
+
+    void set_orchestration_mode(int mode) { orchestration_mode_ = mode; }
+    int get_orchestration_mode() const { return orchestration_mode_; }
+
+    // Kernel function address mapping (for platform kernel registration)
+    void set_function_bin_addr(int func_id, uint64_t addr) {
+        if (func_id >= 0 && func_id < RUNTIME_MAX_FUNC_ID) {
+            func_id_to_addr_[func_id] = addr;
+        }
+    }
+    uint64_t get_function_bin_addr(int func_id) const {
+        if (func_id < 0 || func_id >= RUNTIME_MAX_FUNC_ID) return 0;
+        return func_id_to_addr_[func_id];
+    }
+
+    // PTO2 shared memory pointer (for device orchestration)
+    void set_pto2_gm_sm_ptr(void* ptr) { pto2_gm_sm_ptr_ = ptr; }
+    void* get_pto2_gm_sm_ptr() const { return pto2_gm_sm_ptr_; }
+    int32_t get_pto2_sm_size() const { return sizeof(PTOSharedHeader); }
+
+private:
+    // Kernel function ID to device address mapping
+    uint64_t func_id_to_addr_[RUNTIME_MAX_FUNC_ID] = {0};
+
+    // PTO2 shared memory pointer
+    void* pto2_gm_sm_ptr_ = nullptr;
 };
 
 #endif  // ORCH_BUILD_GRAPH_RUNTIME_H
