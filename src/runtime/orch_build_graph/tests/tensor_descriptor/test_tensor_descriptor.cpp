@@ -354,7 +354,7 @@ void verify_overlap_consistency(
  * 创建 TensorDescriptor 的辅助函数
  */
 TensorDescriptor make_tensor(uint64_t addr,
-    int32_t buffer_size_bytes,
+    uint64_t buffer_size_bytes,
     uint64_t start_offset,
     std::vector<uint64_t> strides_vec,
     std::vector<uint64_t> repeats_vec,

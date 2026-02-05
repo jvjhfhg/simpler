@@ -48,7 +48,7 @@ void TensorDescriptor::ContiguousMemSegIterator::operator++() {
 
 // TensorDescriptor constructors
 TensorDescriptor::TensorDescriptor(uint64_t addr,
-    int32_t buffer_size_bytes,
+    uint64_t buffer_size_bytes,
     uint64_t start_offset,
     uint64_t strides[],
     uint64_t repeats[],
@@ -65,7 +65,7 @@ TensorDescriptor::TensorDescriptor(uint64_t addr,
 }
 
 TensorDescriptor::TensorDescriptor(uint64_t addr,
-    int32_t buffer_size_bytes,
+    uint64_t buffer_size_bytes,
     uint64_t start_offset,
     const std::vector<uint64_t>& strides,
     const std::vector<uint64_t>& repeats,

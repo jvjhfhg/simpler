@@ -17,7 +17,7 @@
  */
 struct PTOBufferHandle {
     uint64_t addr;  // Device memory address (bytes)
-    int32_t size;   // Total buffer size in bytes
+    uint64_t size;  // Total buffer size in bytes
 };
 
 #ifndef NDEBUG
@@ -96,7 +96,7 @@ struct TensorDescriptor {
     TensorDescriptor() : buffer{0, 0}, ndims(0), dtype(DataType::FLOAT32) {}
 
     explicit TensorDescriptor(uint64_t addr,
-        int32_t buffer_size_bytes,
+        uint64_t buffer_size_bytes,
         uint64_t start_offset,
         uint64_t strides[],
         uint64_t repeats[],
@@ -106,7 +106,7 @@ struct TensorDescriptor {
         OverlapType overlap_type = OverlapType::Accurate);
 
     explicit TensorDescriptor(uint64_t addr,
-        int32_t buffer_size_bytes,
+        uint64_t buffer_size_bytes,
         uint64_t start_offset,
         const std::vector<uint64_t>& strides,
         const std::vector<uint64_t>& repeats,

@@ -372,7 +372,7 @@ int Runtime::pto_submit_task(int32_t func_id, PTOWorkerType worker_type, PTOPara
                 uint64_t tensor_bytes = tensor.numel() * get_element_size(tensor.dtype);
                 if (tensor_bytes != params[i].buffer->size) {
                     printf("[PTO] ERROR: Tensor size mismatch at param %d\n", i);
-                    printf("[PTO] Tensor bytes: %lu, Buffer size: %d\n", tensor_bytes, params[i].buffer->size);
+                    printf("[PTO] Tensor bytes: %lu, Buffer size: %lu\n", tensor_bytes, params[i].buffer->size);
                     printf("[PTO] Tensor details:\n%s", tensor.dump().c_str());
                     always_assert(false && "Tensor size does not match buffer size");
                 }
