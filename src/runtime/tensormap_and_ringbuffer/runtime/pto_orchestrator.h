@@ -76,6 +76,18 @@ struct PTO2OrchestratorState {
     int64_t buffers_allocated;
     int64_t bytes_allocated;
 
+    // === AICPU PARALLEL MODE (set by aicpu_executor, NULL when unused) ===
+    int32_t* aicpu_fanin_refcount;
+    volatile int32_t* aicpu_task_completed;
+    int32_t* aicpu_completed_by_task;  // task_id that set completed state (for slot-reuse validation)
+    int32_t aicpu_window_mask;
+
+    // === ORCHESTRATOR READY QUEUE (early-return path -> scheduler) ===
+    static constexpr int32_t ORCH_READY_QUEUE_SIZE = 4096;
+    volatile int32_t orch_ready_queue[4096];
+    volatile int32_t orch_ready_tail;  // written by orchestrator only
+    volatile int32_t orch_ready_head;  // advanced by scheduler via CAS
+
     /**
      * Allocate packed output buffer for a task
      */
@@ -137,6 +149,17 @@ void pto2_orchestrator_set_scheduler(PTO2OrchestratorState* orch, PTO2SchedulerS
  */
 void pto2_orchestrator_set_scheduler_mode(
     PTO2OrchestratorState* orch, PTO2SchedulerState* scheduler, bool init_on_submit);
+
+// =============================================================================
+// Internal Helpers
+// =============================================================================
+
+/**
+ * Add consumer to producer's fanout list (with spinlock)
+ * Also checks if producer has already completed and updates consumer's fanin_refcount.
+ */
+void pto2_add_consumer_to_producer(
+    PTO2OrchestratorState* orch, PTO2TaskDescriptor* producer, int32_t producer_id, int32_t consumer_id);
 
 // =============================================================================
 // Scope Management

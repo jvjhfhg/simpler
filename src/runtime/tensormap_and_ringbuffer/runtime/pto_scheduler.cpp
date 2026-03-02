@@ -307,6 +307,11 @@ int32_t pto2_scheduler_on_task_complete(PTO2SchedulerState* sched,
         fanout_notified++;
         int32_t consumer_id = entry->task_id;
         PTO2TaskDescriptor* consumer = pto2_sm_get_task(sched->sm_handle, consumer_id);
+        int32_t observed_consumer_id = __atomic_load_n(&consumer->task_id, __ATOMIC_ACQUIRE);
+        if (observed_consumer_id != consumer_id) {
+            current = entry->next_offset;
+            continue;
+        }
 
         // Atomically increment consumer's fanin_refcount and check if consumer is now ready
         sched->release_fanin_and_check_ready(consumer_id, consumer, ready_wait_cycles, ready_hold_cycles);
@@ -343,6 +348,10 @@ void pto2_scheduler_on_scope_end(PTO2SchedulerState* sched,
 void pto2_scheduler_release_producer(PTO2SchedulerState* sched, int32_t producer_id) {
     int32_t slot = sched->pto2_task_slot(producer_id);
     PTO2TaskDescriptor* producer = pto2_sm_get_task(sched->sm_handle, producer_id);
+    int32_t observed_producer_id = __atomic_load_n(&producer->task_id, __ATOMIC_ACQUIRE);
+    if (observed_producer_id != producer_id) {
+        return;  // Slot already reused by a newer task_id
+    }
 
     // Increment fanout_refcount atomically (called from both orchestrator and scheduler threads)
     __atomic_fetch_add(&sched->fanout_refcount[slot], 1, __ATOMIC_ACQ_REL);
@@ -387,10 +396,29 @@ void pto2_scheduler_advance_ring_pointers(PTO2SchedulerState* sched) {
 void pto2_scheduler_sync_to_sm(PTO2SchedulerState* sched) {
     PTO2SharedMemoryHeader* header = sched->sm_handle->header;
 
-    PTO2_STORE_RELEASE(&header->last_task_alive, sched->last_task_alive);
-    PTO2_STORE_RELEASE(&header->heap_tail, sched->heap_tail);
+    // Never regress values already advanced by the AICPU completion fast path.
+    int32_t published_last_alive = PTO2_LOAD_ACQUIRE(&header->last_task_alive);
+    uint64_t published_heap_tail = PTO2_LOAD_ACQUIRE(&header->heap_tail);
+
+    int32_t out_last_alive = sched->last_task_alive;
+    if (out_last_alive < published_last_alive) {
+        out_last_alive = published_last_alive;
+    }
+
+    uint64_t out_heap_tail = sched->heap_tail;
+    if (out_heap_tail < published_heap_tail) {
+        out_heap_tail = published_heap_tail;
+    }
+
+    PTO2_STORE_RELEASE(&header->last_task_alive, out_last_alive);
+    PTO2_STORE_RELEASE(&header->heap_tail, out_heap_tail);
     // Keep generation in sync so AICPU mode sees a consistent starting state
-    PTO2_STORE_RELEASE(&header->heap_tail_gen, sched->last_task_alive);
+    int32_t out_gen = out_last_alive;
+    int32_t published_gen = PTO2_LOAD_ACQUIRE(&header->heap_tail_gen);
+    if (out_gen < published_gen) {
+        out_gen = published_gen;
+    }
+    PTO2_STORE_RELEASE(&header->heap_tail_gen, out_gen);
 }
 
 // =============================================================================

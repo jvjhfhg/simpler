@@ -136,6 +136,31 @@ struct PTO2SchedulerState {
         }
     }
 
+    // Rescue path for early-ready tasks: no refcount increment, only readiness check.
+    bool try_enqueue_if_ready(int32_t task_id,
+                              PTO2TaskDescriptor* task,
+                              uint64_t* ready_wait_cycles = nullptr,
+                              uint64_t* ready_hold_cycles = nullptr) {
+        int32_t slot = pto2_task_slot(task_id);
+        int32_t observed_task_id = __atomic_load_n(&task->task_id, __ATOMIC_ACQUIRE);
+        if (observed_task_id != task_id) {
+            return false;
+        }
+        int32_t refcount = __atomic_load_n(&fanin_refcount[slot], __ATOMIC_ACQUIRE);
+        int32_t fanin_count = task->fanin_count;
+
+        if (refcount >= fanin_count) {
+            PTO2TaskState expected = PTO2_TASK_PENDING;
+            if (__atomic_compare_exchange_n(&task_state[slot], &expected, PTO2_TASK_READY,
+                                             false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                pto2_ready_queue_push(&ready_queues[task->worker_type], task_id,
+                    ready_wait_cycles, ready_hold_cycles);
+                return true;
+            }
+        }
+        return false;
+    }
+
     void init_task(int32_t task_id, PTO2TaskDescriptor* task) {
         int32_t slot = pto2_task_slot(task_id);
 

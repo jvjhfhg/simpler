@@ -132,6 +132,8 @@ void pto2_orchestrator_reset(PTO2OrchestratorState* orch) {
     orch->tasks_submitted = 0;
     orch->buffers_allocated = 0;
     orch->bytes_allocated = 0;
+    orch->orch_ready_head = 0;
+    orch->orch_ready_tail = 0;
 
     // Reset shared memory header
     orch->sm_handle->header->current_task_index = 0;
@@ -148,6 +150,55 @@ void pto2_orchestrator_set_scheduler_mode(
     PTO2OrchestratorState* orch, PTO2SchedulerState* scheduler, bool init_on_submit) {
     orch->scheduler = scheduler;
     orch->init_task_on_submit = init_on_submit;
+}
+
+void pto2_add_consumer_to_producer(
+    PTO2OrchestratorState* orch, PTO2TaskDescriptor* producer, int32_t producer_id, int32_t consumer_id) {
+    pto2_fanout_lock(producer);
+
+    // AICPU parallel mode: producer completed before fanout link is materialized.
+    // completed_by_task prevents stale "completed" state from a recycled slot.
+    if (orch->aicpu_task_completed && orch->aicpu_fanin_refcount && orch->aicpu_completed_by_task &&
+        orch->aicpu_window_mask > 0) {
+        int32_t prod_slot = producer_id & orch->aicpu_window_mask;
+        if (__atomic_load_n(&orch->aicpu_task_completed[prod_slot], __ATOMIC_ACQUIRE) >= 2 &&
+            __atomic_load_n(&orch->aicpu_completed_by_task[prod_slot], __ATOMIC_RELAXED) == producer_id) {
+            // Even when producer already completed (so fanout callback won't fire),
+            // keep fanout_count consistent with the consumer's later release_producer().
+            // Otherwise producer may transition CONSUMED too early and be reclaimed
+            // before this consumer finishes.
+            producer->fanout_count++;
+
+            int32_t cons_slot = consumer_id & orch->aicpu_window_mask;
+            __atomic_fetch_add(&orch->aicpu_fanin_refcount[cons_slot], 1, __ATOMIC_ACQ_REL);
+            // Keep scheduler refcount coherent with AICPU early-return credit.
+            // init_task() intentionally does not reset fanin_refcount, so this is safe
+            // even when credited before task initialization.
+            if (orch->scheduler) {
+                int32_t sched_cons_slot = orch->scheduler->pto2_task_slot(consumer_id);
+                __atomic_fetch_add(&orch->scheduler->fanin_refcount[sched_cons_slot], 1, __ATOMIC_ACQ_REL);
+            }
+            pto2_fanout_unlock(producer);
+            return;
+        }
+    }
+
+    // Normal path: append consumer to producer fanout.
+    producer->fanout_head = pto2_dep_list_prepend(&orch->dep_pool, producer->fanout_head, consumer_id);
+    producer->fanout_count++;
+
+    // Scheduler fallback for host/sim mode.
+    if (orch->scheduler) {
+        PTO2SchedulerState* sched = orch->scheduler;
+        int32_t prod_slot = sched->pto2_task_slot(producer_id);
+        int32_t prod_state = __atomic_load_n(&sched->task_state[prod_slot], __ATOMIC_ACQUIRE);
+        if (prod_state >= PTO2_TASK_COMPLETED) {
+            int32_t cons_slot = sched->pto2_task_slot(consumer_id);
+            __atomic_fetch_add(&sched->fanin_refcount[cons_slot], 1, __ATOMIC_ACQ_REL);
+        }
+    }
+
+    pto2_fanout_unlock(producer);
 }
 
 // =============================================================================
@@ -220,6 +271,25 @@ void pto2_submit_task(PTO2OrchestratorState* orch,
     CYCLE_COUNT_LAP_RECORD(g_orch_alloc_cycle, AicpuPhaseId::ORCH_ALLOC);
 
     PTO2TaskDescriptor* task = pto2_task_ring_get(&orch->task_ring, task_id);
+
+    // Reset slot-completion markers for ring-slot reuse in AICPU parallel mode.
+    if (orch->aicpu_task_completed && orch->aicpu_completed_by_task && orch->aicpu_window_mask > 0) {
+        int32_t slot = task_id & orch->aicpu_window_mask;
+        if (orch->aicpu_fanin_refcount) {
+            __atomic_store_n(&orch->aicpu_fanin_refcount[slot], 0, __ATOMIC_RELEASE);
+        }
+        __atomic_store_n(&orch->aicpu_task_completed[slot], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&orch->aicpu_completed_by_task[slot], -1, __ATOMIC_RELEASE);
+    }
+    if (orch->scheduler) {
+        int32_t sched_slot = orch->scheduler->pto2_task_slot(task_id);
+        // In AICPU fast-reclaim mode, slots may be reused before scheduler-side
+        // CONSUMED transitions finish. Clear per-slot state here to avoid stale
+        // refcount/state leakage across task_id reuse.
+        __atomic_store_n(&orch->scheduler->fanin_refcount[sched_slot], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&orch->scheduler->fanout_refcount[sched_slot], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&orch->scheduler->task_state[sched_slot], PTO2_TASK_PENDING, __ATOMIC_RELEASE);
+    }
 
     // Initialize task descriptor
     task->task_id = task_id;
@@ -304,6 +374,10 @@ void pto2_submit_task(PTO2OrchestratorState* orch,
                         if (fanin_count < PTO2_MAX_INPUTS) {
                             fanin_temp[fanin_count++] = producer_task_id;
                         }
+
+                        // Link producer->consumer, or early-credit if producer already completed.
+                        PTO2TaskDescriptor* producer = pto2_task_ring_get(&orch->task_ring, producer_task_id);
+                        pto2_add_consumer_to_producer(orch, producer, producer_task_id, task_id);
                     }
                     if (p.type == PTOParamType::INOUT && overlap_status == OverlapStatus::COVERED) {
                         // inout因为会再次insert进tensor map，
@@ -349,42 +423,25 @@ void pto2_submit_task(PTO2OrchestratorState* orch,
     CYCLE_COUNT_LAP_RECORD(g_orch_insert_cycle, AicpuPhaseId::ORCH_INSERT);
 
     // === STEP 5: Finalize fanin list ===
-    // First build the fanin list
-    if (orch->scheduler) {
-        PTO2SchedulerState* sched = orch->scheduler;
-        int32_t slot = sched->pto2_task_slot(task_id);
+    // Keep current scheduler contract: synthetic +1 dependency released by init_task().
+    for (int i = 0; i < fanin_count; i++) {
+        task->fanin_head = pto2_dep_list_prepend(&orch->dep_pool, task->fanin_head, fanin_temp[i]);
+    }
+    __atomic_store_n(&task->fanin_count, fanin_count + 1, __ATOMIC_RELEASE);
 
-        int32_t early_finished = 0;
-        // Synthetic +1 lifecycle (orchestrator/scheduler contract):
-        // - Publish fanin_count as (real_fanin + 1). The extra 1 is a synthetic dependency that
-        //   prevents READY while Step 5 is still wiring fanin/fanout links.
-        // - Real dependencies are credited via fanin_refcount increments:
-        //   * immediately here for producers already COMPLETED (early_finished),
-        //   * later in pto2_scheduler_on_task_complete() for producers that complete afterwards.
-        // - Step 6 init_task() calls release_fanin_and_check_ready() once; this is the synthetic
-        //   dependency's final release (decrement-equivalent). Only then can fanin_refcount reach
-        //   fanin_count and transition PENDING -> READY.
-        task->fanin_count = fanin_count + 1;
-        for (int i = 0; i < fanin_count; i++) {
-            int32_t producer_task_id = fanin_temp[i];
-            // Add this task to producer's fanout list (with spinlock)
-            PTO2TaskDescriptor* producer = pto2_task_ring_get(&orch->task_ring, producer_task_id);
-            pto2_fanout_lock(producer);
-            producer->fanout_head = pto2_dep_list_prepend(&orch->dep_pool, producer->fanout_head, task_id);
-            producer->fanout_count++;
-            // Normal path: prepend consumer to producer's fanout list
-            task->fanin_head = pto2_dep_list_prepend(&orch->dep_pool, task->fanin_head, producer_task_id);
-
-            int32_t prod_slot = sched->pto2_task_slot(producer_task_id);
-            int32_t prod_state = __atomic_load_n(&sched->task_state[prod_slot], __ATOMIC_ACQUIRE);
-            if (prod_state >= PTO2_TASK_COMPLETED) {
-                // Producer already completed before this consumer is initialized; pre-credit its dependency release.
-                early_finished++;
+    // If all real deps were already satisfied by early-return credits, push to
+    // orchestrator-ready queue so scheduler threads can do a non-scan rescue.
+    if (orch->aicpu_fanin_refcount && fanin_count > 0 && orch->aicpu_window_mask > 0) {
+        int32_t slot = task_id & orch->aicpu_window_mask;
+        int32_t refcount = __atomic_load_n(&orch->aicpu_fanin_refcount[slot], __ATOMIC_ACQUIRE);
+        if (refcount >= fanin_count) {
+            int32_t tail = orch->orch_ready_tail;
+            int32_t capacity = PTO2OrchestratorState::ORCH_READY_QUEUE_SIZE;
+            int32_t head = __atomic_load_n(&orch->orch_ready_head, __ATOMIC_ACQUIRE);
+            if (((tail + 1) & (capacity - 1)) != (head & (capacity - 1))) {
+                orch->orch_ready_queue[tail & (capacity - 1)] = task_id;
+                __atomic_store_n(&orch->orch_ready_tail, tail + 1, __ATOMIC_RELEASE);
             }
-            pto2_fanout_unlock(producer);
-        }
-        if (early_finished > 0) {
-            __atomic_fetch_add(&sched->fanin_refcount[slot], early_finished, __ATOMIC_SEQ_CST);
         }
     }
 
