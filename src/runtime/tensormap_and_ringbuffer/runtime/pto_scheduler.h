@@ -36,7 +36,16 @@ typedef struct {
     uint64_t tail;        // Enqueue position
     uint64_t capacity;    // Queue capacity
     uint64_t count;       // Current number of tasks in queue
+    int32_t spinlock;     // Spinlock for thread-safe push/pop
 } PTO2ReadyQueue;
+
+/**
+ * Push task to ready queue
+ * @return true if successful, false if queue is full
+ */
+bool pto2_ready_queue_push(PTO2ReadyQueue* queue, int32_t task_id,
+                            uint64_t* wait_cycles = nullptr,
+                            uint64_t* hold_cycles = nullptr);
 
 // =============================================================================
 // Scheduler State
@@ -48,7 +57,7 @@ typedef struct {
  * Contains dynamic state updated during task execution.
  * Separated from shared memory for cache efficiency.
  */
-typedef struct PTO2SchedulerState {
+struct PTO2SchedulerState {
     // Shared memory access
     PTO2SharedMemoryHandle* sm_handle;
 
@@ -81,15 +90,65 @@ typedef struct PTO2SchedulerState {
     int64_t tasks_consumed;
     int64_t total_dispatch_cycles;
 
-} PTO2SchedulerState;
 
-/**
- * Calculate task slot from task_id
- * Uses runtime window_size instead of compile-time constant
- */
-static inline int32_t pto2_task_slot(PTO2SchedulerState* sched, int32_t task_id) {
-    return task_id & sched->task_window_mask;
-}
+
+    /**
+    * Calculate task slot from task_id
+    * Uses runtime window_size instead of compile-time constant
+    */
+    inline int32_t pto2_task_slot(int32_t task_id) {
+        return task_id & task_window_mask;
+    }
+
+    // =============================================================================
+    // Task State Management
+    // =============================================================================
+
+    /**
+     * Signal that one fanin dependency has been satisfied
+     *
+     * Atomically increments fanin_refcount. If the new count equals
+     * fanin_count, CAS PENDING -> READY and enqueue.
+     *
+     * @param task_id Task ID
+     * @param task    Task descriptor
+     */
+    void release_fanin_and_check_ready(int32_t task_id,
+                                        PTO2TaskDescriptor* task,
+                                        uint64_t* ready_wait_cycles = nullptr,
+                                        uint64_t* ready_hold_cycles = nullptr) {
+        int32_t slot = pto2_task_slot(task_id);
+
+        // Atomically increment fanin_refcount and check if all producers are done
+        // ACQ_REL on fanin_refcount already synchronizes with the orchestrator's
+        // release in init_task, making fanin_count visible — plain load suffices.
+        int32_t new_refcount = __atomic_fetch_add(&fanin_refcount[slot], 1, __ATOMIC_ACQ_REL) + 1;
+
+        // Check if all producers have completed
+        if (new_refcount == task->fanin_count) {
+            // CAS PENDING -> READY to prevent double-enqueue from concurrent threads
+            PTO2TaskState expected = PTO2_TASK_PENDING;
+            if (__atomic_compare_exchange_n(&task_state[slot], &expected, PTO2_TASK_READY,
+                                             false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                pto2_ready_queue_push(&ready_queues[task->worker_type], task_id,
+                    ready_wait_cycles, ready_hold_cycles);
+            }
+        }
+    }
+
+    void init_task(int32_t task_id, PTO2TaskDescriptor* task) {
+        int32_t slot = pto2_task_slot(task_id);
+
+        task_state[slot] = PTO2_TASK_PENDING; // Orchestrator is the unique owner
+
+        // Reset fanout_refcount for new task lifecycle.
+        // Do NOT reset fanin_refcount — it may have been incremented by
+        // concurrent on_task_complete between Step 5 and Step 6.
+        fanout_refcount[slot] = 0;
+
+        release_fanin_and_check_ready(task_id, task);
+    }
+};
 
 // =============================================================================
 // Scheduler API
@@ -139,16 +198,13 @@ void pto2_ready_queue_destroy(PTO2ReadyQueue* queue);
 void pto2_ready_queue_reset(PTO2ReadyQueue* queue);
 
 /**
- * Push task to ready queue
- * @return true if successful, false if queue is full
- */
-bool pto2_ready_queue_push(PTO2ReadyQueue* queue, int32_t task_id);
-
-/**
  * Pop task from ready queue
  * @return task_id, or -1 if queue is empty
  */
-int32_t pto2_ready_queue_pop(PTO2ReadyQueue* queue);
+int32_t pto2_ready_queue_pop(PTO2ReadyQueue* queue,
+                              uint64_t* wait_cycles = nullptr,
+                              uint64_t* hold_cycles = nullptr,
+                              bool* hit = nullptr);
 
 /**
  * Check if ready queue is empty
@@ -176,31 +232,6 @@ static inline uint64_t pto2_ready_queue_count(PTO2ReadyQueue* queue) {
 // =============================================================================
 
 /**
- * Initialize task in scheduler (called when task is submitted)
- *
- * Sets task state to PENDING or READY based on fanin_count.
- *
- * @param sched   Scheduler state
- * @param task_id Task ID
- * @param task    Task descriptor (from shared memory)
- */
-void pto2_scheduler_init_task(PTO2SchedulerState* sched, int32_t task_id,
-                               PTO2TaskDescriptor* task);
-
-/**
- * Check if task should transition to READY
- *
- * Called after fanin_refcount is updated.
- * If fanin_refcount == fanin_count, moves task to READY and enqueues.
- *
- * @param sched   Scheduler state
- * @param task_id Task ID
- * @param task    Task descriptor
- */
-void pto2_scheduler_check_ready(PTO2SchedulerState* sched, int32_t task_id,
-                                 PTO2TaskDescriptor* task);
-
-/**
  * Mark task as RUNNING (dispatched to worker)
  */
 void pto2_scheduler_mark_running(PTO2SchedulerState* sched, int32_t task_id);
@@ -213,7 +244,10 @@ void pto2_scheduler_mark_running(PTO2SchedulerState* sched, int32_t task_id);
  * @return task_id, or -1 if no ready tasks
  */
 int32_t pto2_scheduler_get_ready_task(PTO2SchedulerState* sched,
-                                       PTO2WorkerType worker_type);
+                                       PTO2WorkerType worker_type,
+                                       uint64_t* wait_cycles = nullptr,
+                                       uint64_t* hold_cycles = nullptr,
+                                       bool* hit = nullptr);
 
 // =============================================================================
 // Task Completion Handling
@@ -230,8 +264,12 @@ int32_t pto2_scheduler_get_ready_task(PTO2SchedulerState* sched,
  *
  * @param sched   Scheduler state
  * @param task_id Completed task ID
+ * @return Number of fanout edges notified by this completion
  */
-void pto2_scheduler_on_task_complete(PTO2SchedulerState* sched, int32_t task_id);
+int32_t pto2_scheduler_on_task_complete(PTO2SchedulerState* sched,
+                                         int32_t task_id,
+                                         uint64_t* ready_wait_cycles = nullptr,
+                                         uint64_t* ready_hold_cycles = nullptr);
 
 /**
  * Handle scope end (called when orchestrator ends a scope)
