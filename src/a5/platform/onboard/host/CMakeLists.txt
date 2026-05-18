@@ -30,6 +30,21 @@ else()
     message(FATAL_ERROR "MUST set CUSTOM_INCLUDE_DIRS to build Host runtime")
 endif()
 
+# SIMPLER_ENABLE_PTO_SDMA_WORKSPACE: marker for an outstanding architectural
+# issue. The SDMA workspace init in comm_hccl.cpp pulls in pto-isa
+# headers and CANN-9.0-only aclnn symbols (aclnnShmemSdmaStarsQuery*),
+# even though it is logically orthogonal to HCCL comm bootstrap and only
+# needed by the sdma_async_completion_demo. Until that coupling is
+# refactored away, the macro is forced ON: PTO_ISA_ROOT and CANN 9.0+ are
+# hard build/runtime preconditions for a5 onboard.
+set(SIMPLER_ENABLE_PTO_SDMA_WORKSPACE ON)
+if(NOT DEFINED ENV{PTO_ISA_ROOT})
+    message(FATAL_ERROR
+        "a5 onboard host_runtime requires PTO_ISA_ROOT "
+        "(SIMPLER_ENABLE_PTO_SDMA_WORKSPACE is forced ON; needs pto-isa headers + CANN 9.0+)")
+endif()
+list(APPEND CMAKE_CUSTOM_INCLUDE_DIRS "$ENV{PTO_ISA_ROOT}/include")
+
 # Build complete source list: core host sources + sources from CUSTOM_SOURCE_DIRS
 set(HOST_RUNTIME_SOURCES "")
 list(APPEND HOST_RUNTIME_SOURCES
@@ -75,6 +90,10 @@ target_compile_options(host_runtime
         -g
 )
 
+if(SIMPLER_ENABLE_PTO_SDMA_WORKSPACE)
+    target_compile_definitions(host_runtime PRIVATE SIMPLER_ENABLE_PTO_SDMA_WORKSPACE=1)
+endif()
+
 # Include directories - always include local headers
 target_include_directories(host_runtime
     PRIVATE
@@ -99,6 +118,10 @@ target_link_directories(host_runtime
         ${ASCEND_HOME_PATH}/runtime/lib64
 )
 
+if(SIMPLER_ENABLE_PTO_SDMA_WORKSPACE)
+    target_link_directories(host_runtime PRIVATE ${ASCEND_HOME_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64)
+endif()
+
 # CANN 9.x exposes the working non-V2 HCCL entry points through libhcomm.
 # Link it explicitly so comm_hccl.cpp can follow the same initialization path
 # as the pto-isa communication tests.
@@ -120,5 +143,9 @@ target_link_libraries(host_runtime
         ${HCCL_LINK_TARGETS}
         dl
 )
+
+if(SIMPLER_ENABLE_PTO_SDMA_WORKSPACE)
+    target_link_libraries(host_runtime PRIVATE nnopbase)
+endif()
 
 set_target_properties(host_runtime PROPERTIES OUTPUT_NAME "host_runtime")
