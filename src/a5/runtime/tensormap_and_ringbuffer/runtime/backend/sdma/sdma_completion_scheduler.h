@@ -59,6 +59,8 @@ inline void retire_sdma_event_record(uint64_t record_addr) {
     cache_flush_range(const_cast<const void *>(reinterpret_cast<volatile void *>(record_head)), sizeof(uint64_t));
 
     if (channel_info_addr == 0) return;
+    // channel_info packs (head, tail) into one 64-bit word; head==tail at
+    // retire signals "queue fully drained" to the SDMA driver.
     uint64_t packed = (static_cast<uint64_t>(completed_tail) << 32) | static_cast<uint64_t>(completed_tail);
     volatile uint64_t *channel_info = reinterpret_cast<volatile uint64_t *>(static_cast<uintptr_t>(channel_info_addr));
     __atomic_store_n(channel_info, packed, __ATOMIC_RELEASE);

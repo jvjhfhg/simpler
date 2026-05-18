@@ -9,8 +9,7 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef PTO_ASYNC_KERNEL_API_H
-#define PTO_ASYNC_KERNEL_API_H
+#pragma once
 
 #include <stdint.h>
 
@@ -29,9 +28,10 @@
 #define __gm__
 #endif
 
-// Public surface: get_async_ctx, register_completion_condition,
-// send_notification, save_expected_notification_counter. Everything else
-// lives in pto2::detail and is reserved for backend adapters / internal use.
+// Public surface: get_async_ctx, async_ctx_is_deferred,
+// register_completion_condition, send_notification,
+// save_expected_notification_counter. Everything else lives in
+// pto2::detail and is reserved for backend adapters / internal use.
 namespace pto2::detail {
 
 inline __aicore__ void defer_load_slab(AsyncCtx &ctx) {
@@ -42,6 +42,12 @@ inline __aicore__ void defer_load_slab(AsyncCtx &ctx) {
 #else
     __asm__ __volatile__("" ::: "memory");
 #endif
+}
+
+inline __aicore__ void defer_error(AsyncCtx &ctx, int32_t error_code) {
+    if (ctx.task_token.is_valid() && ctx.completion_error_code != nullptr) {
+        *ctx.completion_error_code = error_code;
+    }
 }
 
 inline __aicore__ void defer_flush_range(volatile __gm__ void *addr, uint32_t size_bytes) {
@@ -91,11 +97,27 @@ inline __aicore__ void defer_flush(AsyncCtx &ctx) {
 inline __aicore__ AsyncCtx get_async_ctx(__gm__ int64_t *args) {
     __gm__ LocalContext *lc =
         reinterpret_cast<__gm__ LocalContext *>(static_cast<uintptr_t>(args[PAYLOAD_LOCAL_CONTEXT_INDEX]));
-    AsyncCtx ctx = lc->async_ctx;
+    // Field-by-field copy is mandatory: CCE rejects `AsyncCtx ctx = lc->async_ctx;`
+    // because there is no implicit constructor that crosses the __gm__ address
+    // space into Local Memory. When a new field is added to AsyncCtx, mirror it
+    // below or this kernel path will silently see zero for that field.
+    AsyncCtx ctx{};
+    ctx.completion_count = lc->async_ctx.completion_count;
+    ctx.completion_error_code = lc->async_ctx.completion_error_code;
+    ctx.completion_entries = lc->async_ctx.completion_entries;
+    ctx.completion_capacity = lc->async_ctx.completion_capacity;
+    ctx.task_token.raw = lc->async_ctx.task_token.raw;
     pto2::detail::defer_load_slab(ctx);
     return ctx;
 }
 
+inline __aicore__ bool async_ctx_is_deferred(const AsyncCtx &ctx) { return ctx.task_token.is_valid(); }
+
+// Canonical writer: backend submit handlers build a CompletionToken and pass
+// it here. Writes one DeferredCompletionEntry to the AsyncCtx slab and
+// bumps completion_count. Returns false on overflow (also stores
+// PTO2_ERROR_ASYNC_WAIT_OVERFLOW in ctx.completion_error_code) or when ctx is
+// not currently a deferred context.
 inline __aicore__ bool register_completion_condition(AsyncCtx &ctx, const CompletionToken &token) {
     if (ctx.task_token.is_invalid() || ctx.completion_count == nullptr || ctx.completion_entries == nullptr) {
         return false;
@@ -134,5 +156,3 @@ save_expected_notification_counter(AsyncCtx &ctx, volatile __gm__ void *counter_
     (void)register_completion_condition(ctx, token);
     pto2::detail::defer_flush(ctx);
 }
-
-#endif  // PTO_ASYNC_KERNEL_API_H

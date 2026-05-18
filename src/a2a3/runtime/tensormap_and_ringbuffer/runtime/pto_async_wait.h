@@ -9,8 +9,7 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef PTO_ASYNC_WAIT_H
-#define PTO_ASYNC_WAIT_H
+#pragma once
 
 #include <atomic>
 #include <cstddef>
@@ -367,5 +366,3 @@ struct AsyncWaitList {
 #endif
     );
 };
-
-#endif  // PTO_ASYNC_WAIT_H

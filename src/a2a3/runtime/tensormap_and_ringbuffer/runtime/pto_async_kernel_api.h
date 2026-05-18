@@ -9,8 +9,7 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef PTO_ASYNC_KERNEL_API_H
-#define PTO_ASYNC_KERNEL_API_H
+#pragma once
 
 #include <stdint.h>
 
@@ -98,6 +97,10 @@ inline __aicore__ void defer_flush(AsyncCtx &ctx) {
 inline __aicore__ AsyncCtx get_async_ctx(__gm__ int64_t *args) {
     __gm__ LocalContext *lc =
         reinterpret_cast<__gm__ LocalContext *>(static_cast<uintptr_t>(args[PAYLOAD_LOCAL_CONTEXT_INDEX]));
+    // Field-by-field copy is mandatory: CCE rejects `AsyncCtx ctx = lc->async_ctx;`
+    // because there is no implicit constructor that crosses the __gm__ address
+    // space into Local Memory. When a new field is added to AsyncCtx, mirror it
+    // below or this kernel path will silently see zero for that field.
     AsyncCtx ctx{};
     ctx.completion_count = lc->async_ctx.completion_count;
     ctx.completion_error_code = lc->async_ctx.completion_error_code;
@@ -153,5 +156,3 @@ save_expected_notification_counter(AsyncCtx &ctx, volatile __gm__ void *counter_
     (void)register_completion_condition(ctx, token);
     pto2::detail::defer_flush(ctx);
 }
-
-#endif  // PTO_ASYNC_KERNEL_API_H

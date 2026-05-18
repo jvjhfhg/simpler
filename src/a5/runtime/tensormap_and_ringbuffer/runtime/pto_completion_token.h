@@ -9,12 +9,12 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef SRC_A5_RUNTIME_TENSORMAP_AND_RINGBUFFER_RUNTIME_PTO_COMPLETION_TOKEN_H_
-#define SRC_A5_RUNTIME_TENSORMAP_AND_RINGBUFFER_RUNTIME_PTO_COMPLETION_TOKEN_H_
+#pragma once
 
 #include <stdint.h>
 
 #include "aicore_completion_mailbox.h"
+#include "pto_runtime_status.h"
 
 // CompletionToken is the runtime-internal POD that backend submit handlers
 // produce and the generic register_completion_condition() consumes. It is the
@@ -30,4 +30,13 @@ struct CompletionToken {
     uint64_t backend_cookie;
 };
 
-#endif  // SRC_A5_RUNTIME_TENSORMAP_AND_RINGBUFFER_RUNTIME_PTO_COMPLETION_TOKEN_H_
+enum class CompletionPollState : uint8_t {
+    PENDING = 0,
+    READY = 1,
+    FAILED = 2,
+};
+
+struct CompletionPollResult {
+    CompletionPollState state{CompletionPollState::PENDING};
+    int32_t error_code{PTO2_ERROR_NONE};
+};

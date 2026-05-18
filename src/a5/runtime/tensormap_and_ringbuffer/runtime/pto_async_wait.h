@@ -9,15 +9,17 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef PTO_ASYNC_WAIT_H
-#define PTO_ASYNC_WAIT_H
+#pragma once
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 
+#include "aicpu/platform_regs.h"
+#include "backend/sdma/sdma_completion_scheduler.h"
 #include "intrinsic.h"
 #include "aicore_completion_mailbox.h"
+#include "pto_completion_token.h"
 #include "pto_runtime2_types.h"
 
 struct PTO2SchedulerState;
@@ -34,35 +36,83 @@ inline bool aicore_completion_mailbox_has_pending(volatile AICoreCompletionMailb
     return tail < head;
 }
 
-enum class CompletionPollState : uint8_t {
-    PENDING = 0,
-    READY = 1,
-    FAILED = 2,
-};
+inline uintptr_t mailbox_cache_line(const volatile void *addr) {
+    return reinterpret_cast<uintptr_t>(addr) & ~(uintptr_t(PTO2_ALIGN_SIZE) - 1u);
+}
 
-struct CompletionPollResult {
-    CompletionPollState state{CompletionPollState::PENDING};
-    int32_t error_code{PTO2_ERROR_NONE};
+struct CompletionCondition;
+
+using CompletionPollFn = CompletionPollResult (*)(const CompletionCondition &);
+using CompletionRetireFn = void (*)(CompletionCondition &);
+
+struct CompletionBackendOps {
+    CompletionPollFn poll;
+    CompletionRetireFn retire;
 };
 
 struct CompletionCondition {
     AsyncEngine engine{ASYNC_ENGINE_SDMA};
+    int32_t completion_type{COMPLETION_TYPE_COUNTER};
     bool satisfied{false};
+    bool retired{false};
     volatile uint32_t *counter_addr{nullptr};
+    uint64_t addr{0};
     uint32_t expected_value{0};
 
-    CompletionPollResult test() const {
-        if (satisfied) {
-            return {CompletionPollState::READY, PTO2_ERROR_NONE};
-        }
-        if (counter_addr == nullptr) {
-            return {CompletionPollState::FAILED, PTO2_ERROR_ASYNC_COMPLETION_INVALID};
-        }
-        return {
-            *counter_addr >= expected_value ? CompletionPollState::READY : CompletionPollState::PENDING, PTO2_ERROR_NONE
-        };
-    }
+    CompletionPollResult test() const;
+    void retire();
 };
+
+// Per-completion-type ops. SDMA_EVENT_RECORD detail lives in
+// backend/sdma/sdma_completion_scheduler.h; the op wrappers below are thin
+// glue mapping CompletionCondition.addr into the backend's raw-addr helpers.
+inline CompletionPollResult counter_poll_op(const CompletionCondition &cond) {
+    if (cond.counter_addr == nullptr) {
+        return {CompletionPollState::FAILED, PTO2_ERROR_ASYNC_COMPLETION_INVALID};
+    }
+    return {
+        *cond.counter_addr >= cond.expected_value ? CompletionPollState::READY : CompletionPollState::PENDING,
+        PTO2_ERROR_NONE
+    };
+}
+
+inline void counter_retire_op(CompletionCondition & /*cond*/) {}
+
+inline CompletionPollResult sdma_event_record_poll_op(const CompletionCondition &cond) {
+    return poll_sdma_event_record(cond.addr);
+}
+
+inline void sdma_event_record_retire_op(CompletionCondition &cond) { retire_sdma_event_record(cond.addr); }
+
+inline const CompletionBackendOps *completion_backend_ops_for(int completion_type) {
+    static const CompletionBackendOps kOps[] = {
+        {counter_poll_op, counter_retire_op},                      // COMPLETION_TYPE_COUNTER = 0
+        {sdma_event_record_poll_op, sdma_event_record_retire_op},  // COMPLETION_TYPE_SDMA_EVENT_RECORD = 1
+    };
+    constexpr int kOpsCount = static_cast<int>(sizeof(kOps) / sizeof(kOps[0]));
+    if (completion_type < 0 || completion_type >= kOpsCount) return nullptr;
+    return &kOps[completion_type];
+}
+
+inline CompletionPollResult CompletionCondition::test() const {
+    if (satisfied) {
+        return {CompletionPollState::READY, PTO2_ERROR_NONE};
+    }
+    const CompletionBackendOps *ops = completion_backend_ops_for(completion_type);
+    if (ops == nullptr || ops->poll == nullptr) {
+        return {CompletionPollState::FAILED, PTO2_ERROR_ASYNC_COMPLETION_INVALID};
+    }
+    return ops->poll(*this);
+}
+
+inline void CompletionCondition::retire() {
+    if (retired) return;
+    const CompletionBackendOps *ops = completion_backend_ops_for(completion_type);
+    if (ops != nullptr && ops->retire != nullptr) {
+        ops->retire(*this);
+    }
+    retired = true;
+}
 
 struct AsyncWaitEntry {
     PTO2TaskSlotState *slot_state{nullptr};
@@ -158,7 +208,10 @@ struct AsyncWaitList {
                     }
                     CompletionCondition &cond = entry->conditions[entry->condition_count++];
                     cond.engine = engine;
+                    cond.completion_type = COMPLETION_TYPE_COUNTER;
                     cond.satisfied = false;
+                    cond.retired = false;
+                    cond.addr = addr;
                     cond.counter_addr = reinterpret_cast<volatile uint32_t *>(static_cast<uintptr_t>(addr));
                     cond.expected_value = expected_value;
                     entry->waiting_completion_count++;
@@ -186,7 +239,10 @@ struct AsyncWaitList {
                 if (entry.condition_count < MAX_COMPLETIONS_PER_TASK) {
                     CompletionCondition &cond = entry.conditions[entry.condition_count++];
                     cond.engine = pending_completions[i].engine;
+                    cond.completion_type = COMPLETION_TYPE_COUNTER;
                     cond.satisfied = false;
+                    cond.retired = false;
+                    cond.addr = pending_completions[i].addr;
                     cond.counter_addr =
                         reinterpret_cast<volatile uint32_t *>(static_cast<uintptr_t>(pending_completions[i].addr));
                     cond.expected_value = pending_completions[i].expected_value;
@@ -203,7 +259,8 @@ struct AsyncWaitList {
     enum class RegisterResult { Registered, NotDeferred, Skipped, Error };
 
     bool append_condition_locked(
-        AsyncWaitEntry &entry, uint64_t addr, uint32_t expected_value, AsyncEngine engine, int32_t &error_code
+        AsyncWaitEntry &entry, uint64_t addr, uint32_t expected_value, AsyncEngine engine, int32_t completion_type,
+        int32_t &error_code
     ) {
         if (entry.condition_count >= MAX_COMPLETIONS_PER_TASK) {
             error_code = PTO2_ERROR_ASYNC_REGISTRATION_FAILED;
@@ -211,8 +268,13 @@ struct AsyncWaitList {
         }
         CompletionCondition &cond = entry.conditions[entry.condition_count++];
         cond.engine = engine;
+        cond.completion_type = completion_type;
         cond.satisfied = false;
-        cond.counter_addr = reinterpret_cast<volatile uint32_t *>(static_cast<uintptr_t>(addr));
+        cond.retired = false;
+        cond.addr = addr;
+        cond.counter_addr = completion_type == COMPLETION_TYPE_COUNTER ?
+                                reinterpret_cast<volatile uint32_t *>(static_cast<uintptr_t>(addr)) :
+                                nullptr;
         cond.expected_value = expected_value;
         entry.waiting_completion_count++;
         return true;
@@ -274,9 +336,14 @@ struct AsyncWaitList {
 
         for (uint32_t i = 0; i < deferred_count; ++i) {
             volatile DeferredCompletionEntry *deferred = &async_ctx.completion_entries[i];
+            if (deferred->completion_type == COMPLETION_TYPE_COUNTER) {
+                volatile uint32_t *counter =
+                    reinterpret_cast<volatile uint32_t *>(static_cast<uintptr_t>(deferred->addr));
+                cache_invalidate_range(reinterpret_cast<const void *>(mailbox_cache_line(counter)), sizeof(uint32_t));
+            }
             if (!append_condition_locked(
                     *entry, deferred->addr, deferred->expected_value, static_cast<AsyncEngine>(deferred->engine),
-                    error_code
+                    deferred->completion_type, error_code
                 )) {
                 unlock();
                 return RegisterResult::Error;
@@ -299,5 +366,3 @@ struct AsyncWaitList {
 #endif
     );
 };
-
-#endif  // PTO_ASYNC_WAIT_H

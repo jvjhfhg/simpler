@@ -9,8 +9,7 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef SRC_A5_RUNTIME_TENSORMAP_AND_RINGBUFFER_RUNTIME_AICORE_COMPLETION_MAILBOX_H_
-#define SRC_A5_RUNTIME_TENSORMAP_AND_RINGBUFFER_RUNTIME_AICORE_COMPLETION_MAILBOX_H_
+#pragma once
 
 #include <stdint.h>
 
@@ -33,6 +32,7 @@ inline constexpr int32_t MAX_COMPLETIONS_PER_TASK = 64;
 #define COMPLETION_ENGINE_CCU 3u
 
 #define COMPLETION_TYPE_COUNTER 0
+#define COMPLETION_TYPE_SDMA_EVENT_RECORD 1
 
 struct AICoreCompletionMailboxMessage {
     volatile uint64_t seq;
@@ -78,5 +78,3 @@ struct AICoreCompletionMailbox {
 static_assert(
     sizeof(AICoreCompletionMailbox) % PTO2_ALIGN_SIZE == 0, "AICoreCompletionMailbox size must be cache-line aligned"
 );
-
-#endif  // SRC_A5_RUNTIME_TENSORMAP_AND_RINGBUFFER_RUNTIME_AICORE_COMPLETION_MAILBOX_H_
